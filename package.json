@@ -1,0 +1,24 @@
+{
+  "name": "jit-admin-portal",
+  "version": "2.0.0",
+  "description": "JIT Admin Request Portal - Temporary privileged access management via Okta",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "NODE_ENV=development node src/server.js"
+  },
+  "dependencies": {
+    "@okta/oidc-middleware": "5.4.1",
+    "ejs": "3.1.10",
+    "express": "4.21.0",
+    "express-rate-limit": "7.4.1",
+    "express-session": "1.18.0",
+    "helmet": "7.1.0",
+    "jose": "5.9.6",
+    "uuid": "10.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "private": true
+}

@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.*
+*.pem
+*.key
+npm-debug.log
+.DS_Store
+
+# Local dev/editor state
+.claude/
+
+# Windows reserved filename accidentally created in some environments
+nul
