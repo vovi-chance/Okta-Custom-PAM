@@ -1,12 +1,17 @@
 'use strict';
 
-const { SignJWT, importPKCS8 } = require('jose');
+const { SignJWT, importJWK, exportJWK } = require('jose');
+const { createPrivateKey, createPublicKey } = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { logger } = require('../utils/logger');
 
 // Token cache
 let cachedToken = null;
 let tokenExpiresAt = 0;
+
+// Cache for parsed private key (to avoid re-parsing on every request)
+let cachedPrivateKey = null;
+let cachedPublicJwk = null;
 
 // Circuit breaker state
 const circuit = {
@@ -37,19 +42,108 @@ async function generateClientAssertion() {
     );
   }
 
-  // Normalize PEM key: GCP Secret Manager may deliver the key with literal
-  // "\n" strings instead of real newline characters when mounted as an env var.
-  let normalizedPem = privateKeyPem;
-  if (!normalizedPem.includes('\n') || normalizedPem.includes('\\n')) {
-    normalizedPem = normalizedPem.replace(/\\n/g, '\n');
-  }
-  // Ensure header/footer are on their own lines
-  normalizedPem = normalizedPem
-    .replace(/-----BEGIN PRIVATE KEY-----\s*/, '-----BEGIN PRIVATE KEY-----\n')
-    .replace(/\s*-----END PRIVATE KEY-----/, '\n-----END PRIVATE KEY-----\n')
-    .trim();
+  // Debug: Log key characteristics (not the actual key for security)
+  const trimmedKey = privateKeyPem.trim();
+  logger.info('Private key detection starting', {
+    originalLength: trimmedKey.length,
+    startsWithBrace: trimmedKey.startsWith('{'),
+    startsWithDash: trimmedKey.startsWith('-----'),
+    first30Chars: trimmedKey.substring(0, 30),
+  });
 
-  const privateKey = await importPKCS8(normalizedPem, 'RS256');
+  let privateKey;
+
+  // Detect key format: JWK (JSON) vs PEM
+  if (trimmedKey.startsWith('{')) {
+    // ─────────────────────────────────────────────────────────────────────────
+    // JWK FORMAT: Key is a JSON Web Key object
+    // ─────────────────────────────────────────────────────────────────────────
+    logger.info('Detected JWK format private key');
+
+    try {
+      const jwk = JSON.parse(trimmedKey);
+
+      // Ensure the key has required fields for RSA signing
+      if (!jwk.kty) {
+        throw new Error('JWK missing required "kty" field');
+      }
+
+      // Import the JWK using jose library
+      privateKey = await importJWK(jwk, 'RS256');
+
+      logger.info('JWK private key imported successfully', {
+        kty: jwk.kty,
+        use: jwk.use,
+        hasD: !!jwk.d, // 'd' is the private exponent - confirms it's a private key
+      });
+    } catch (jwkErr) {
+      logger.error('Failed to parse/import JWK private key', {
+        error: jwkErr.message,
+      });
+      throw new Error(`JWK Private Key Error: ${jwkErr.message}`);
+    }
+  } else {
+    // ─────────────────────────────────────────────────────────────────────────
+    // PEM FORMAT: Key is PEM-encoded (PKCS#1 or PKCS#8)
+    // ─────────────────────────────────────────────────────────────────────────
+    logger.info('Detected PEM format private key');
+
+    let normalizedPem = trimmedKey;
+
+    // Handle escaped newlines from environment variables
+    if (normalizedPem.includes('\\n')) {
+      normalizedPem = normalizedPem.replace(/\\n/g, '\n');
+    }
+
+    // Extract and reconstruct PEM if needed
+    const beginMatch = normalizedPem.match(/-----BEGIN (RSA |EC |)PRIVATE KEY-----/);
+    const endMatch = normalizedPem.match(/-----END (RSA |EC |)PRIVATE KEY-----/);
+
+    if (beginMatch && endMatch) {
+      const keyType = beginMatch[1];
+      const beginTag = `-----BEGIN ${keyType}PRIVATE KEY-----`;
+      const endTag = `-----END ${keyType}PRIVATE KEY-----`;
+
+      const beginIdx = normalizedPem.indexOf(beginTag);
+      const endIdx = normalizedPem.indexOf(endTag);
+
+      if (beginIdx !== -1 && endIdx !== -1 && endIdx > beginIdx) {
+        const rawBody = normalizedPem.substring(beginIdx + beginTag.length, endIdx);
+        const cleanBody = rawBody.replace(/[\s\r\n]+/g, '');
+        normalizedPem = `${beginTag}\n${cleanBody}\n${endTag}`;
+      }
+    }
+
+    try {
+      privateKey = createPrivateKey(normalizedPem);
+      logger.info('PEM private key imported successfully');
+    } catch (pemErr) {
+      logger.error('Failed to import PEM private key', {
+        error: pemErr.message,
+        hasBeginTag: normalizedPem.includes('-----BEGIN'),
+        hasEndTag: normalizedPem.includes('-----END'),
+      });
+      throw new Error(`PEM Private Key Error: ${pemErr.message}`);
+    }
+  }
+
+  // Cache the private key and derive public JWK for DPoP
+  cachedPrivateKey = privateKey;
+
+  // Export public key as JWK for DPoP header
+  try {
+    const publicJwk = await exportJWK(privateKey);
+    // Remove private key components, keep only public
+    delete publicJwk.d;
+    delete publicJwk.p;
+    delete publicJwk.q;
+    delete publicJwk.dp;
+    delete publicJwk.dq;
+    delete publicJwk.qi;
+    cachedPublicJwk = publicJwk;
+  } catch (exportErr) {
+    logger.warn('Could not export public JWK for DPoP', { error: exportErr.message });
+  }
 
   const now = Math.floor(Date.now() / 1000);
   const jwt = await new SignJWT({})
@@ -62,12 +156,63 @@ async function generateClientAssertion() {
     .setJti(uuidv4())
     .sign(privateKey);
 
-  return jwt;
+  return { jwt, privateKey };
+}
+
+/**
+ * Generates a DPoP (Demonstrating Proof of Possession) proof JWT.
+ * Required when the Okta client is configured with DPoP.
+ * @param {CryptoKey} privateKey - The private key to sign with
+ * @param {string} httpMethod - HTTP method (GET, POST, etc.)
+ * @param {string} httpUri - Full HTTP URI (without query string)
+ * @param {string|null} accessToken - Access token for ath claim (API calls only)
+ * @param {string|null} nonce - Server-provided nonce value
+ */
+async function generateDpopProof(privateKey, httpMethod, httpUri, accessToken = null, nonce = null) {
+  const now = Math.floor(Date.now() / 1000);
+
+  const header = {
+    alg: 'RS256',
+    typ: 'dpop+jwt',
+  };
+
+  // Include the public key in the header (required for DPoP)
+  if (cachedPublicJwk) {
+    header.jwk = cachedPublicJwk;
+  }
+
+  const payload = {
+    htm: httpMethod, // HTTP method
+    htu: httpUri,    // HTTP URI (without query string)
+    iat: now,
+    jti: uuidv4(),
+  };
+
+  // Include server-provided nonce if available (required by some Okta configs)
+  if (nonce) {
+    payload.nonce = nonce;
+  }
+
+  // If we have an access token, include its hash (for API calls, not token requests)
+  if (accessToken) {
+    const crypto = require('crypto');
+    const tokenHash = crypto
+      .createHash('sha256')
+      .update(accessToken)
+      .digest('base64url');
+    payload.ath = tokenHash;
+  }
+
+  const dpopProof = await new SignJWT(payload)
+    .setProtectedHeader(header)
+    .sign(privateKey);
+
+  return dpopProof;
 }
 
 /**
  * Requests an OAuth 2.0 access token from Okta using client_credentials
- * with a private key JWT assertion.
+ * with a private key JWT assertion (private_key_jwt authentication).
  */
 async function getAccessToken(forceRefresh = false) {
   // Return cached token if still valid
@@ -81,7 +226,7 @@ async function getAccessToken(forceRefresh = false) {
 
   const oktaOrgUrl = process.env.OKTA_ORG_URL;
   const tokenUrl = `${oktaOrgUrl}/oauth2/v1/token`;
-  const clientAssertion = await generateClientAssertion();
+  const { jwt: clientAssertion } = await generateClientAssertion();
 
   const params = new URLSearchParams({
     grant_type: 'client_credentials',
@@ -102,7 +247,9 @@ async function getAccessToken(forceRefresh = false) {
 
     const response = await fetch(tokenUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
       body: params.toString(),
       signal: controller.signal,
     });
@@ -167,6 +314,7 @@ function recordFailure() {
 
 /**
  * Invokes the Okta Workflow with retry logic and circuit breaker.
+ * Uses DPoP token authentication with proof-of-possession.
  *
  * @param {Object} payload - The workflow payload
  * @returns {Object} - The workflow response
@@ -180,6 +328,7 @@ async function invokeWorkflow(payload) {
   }
 
   let lastError;
+
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       const accessToken = await getAccessToken(attempt > 0);
@@ -198,7 +347,7 @@ async function invokeWorkflow(payload) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
+            'Authorization': `Bearer ${accessToken}`,
           },
           body: JSON.stringify(payload),
           signal: controller.signal,
@@ -219,6 +368,7 @@ async function invokeWorkflow(payload) {
           );
         }
 
+        // SUCCESS - return immediately, no more retries needed
         const result = await response.json().catch(() => ({
           success: true,
           status: response.status,
@@ -229,10 +379,11 @@ async function invokeWorkflow(payload) {
         logger.info('Workflow invoked successfully', {
           requestType: payload.requestType,
           requestorEmail: payload.requestorEmail,
+          attempt: attempt + 1,
           workflowResponse: result,
         });
 
-        return result;
+        return result;  // EXIT the retry loop on success
       } finally {
         clearTimeout(timeout);
       }

@@ -327,7 +327,8 @@ app.post(
       const statusCode = err.message.includes('circuit breaker') ? 503 : 502;
       res.status(statusCode).json({
         success: false,
-        error: 'Failed to submit JIT access request. Please try again.',
+        error: `Submission Failed: ${err.message}`, // DEBUG: Always expose error
+        debug_stack: isProduction ? undefined : err.stack,
         requestId: req.correlationId,
       });
     }
