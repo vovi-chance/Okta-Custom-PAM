@@ -85,8 +85,8 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", 'https://fonts.googleapis.com'],
         fontSrc: ["'self'", 'https://fonts.gstatic.com'],
         imgSrc: ["'self'", 'data:'],
         connectSrc: ["'self'"],
@@ -327,7 +327,9 @@ app.post(
       const statusCode = err.message.includes('circuit breaker') ? 503 : 502;
       res.status(statusCode).json({
         success: false,
-        error: `Submission Failed: ${err.message}`, // DEBUG: Always expose error
+        error: isProduction
+          ? 'Failed to submit JIT access request. Please try again.'
+          : `Submission Failed: ${err.message}`,
         debug_stack: isProduction ? undefined : err.stack,
         requestId: req.correlationId,
       });
