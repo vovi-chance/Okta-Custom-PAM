@@ -64,7 +64,7 @@ function validateConfig() {
 }
 
 // ──────────────────────────────────────────────────
-// Trust proxy (Cloud Run behind LB / IAP)
+// Trust proxy (Cloud Run behind Google Front End)
 // ──────────────────────────────────────────────────
 
 app.set('trust proxy', true);
@@ -96,7 +96,7 @@ app.use(
         formAction: ["'self'"],
       },
     },
-    crossOriginEmbedderPolicy: false, // Required for IAP
+    crossOriginEmbedderPolicy: false, // Required for Cloud Run
   })
 );
 
@@ -246,6 +246,7 @@ app.get(
         email: userInfo.email,
         sub: userInfo.sub,
       },
+      version: require('../package.json').version,
       durationRanges: DURATION_RANGES,
     });
   }

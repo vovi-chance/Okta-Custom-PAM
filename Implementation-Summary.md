@@ -32,8 +32,7 @@ The JIT (Just-In-Time) Admin Request Portal allows NFI Industries users to reque
 ### User Flow
 
 1. User navigates to the portal URL
-2. Google IAP authenticates user (Google Workspace: `test.nfiindustries.com`)
-3. User clicks "Sign In with Okta" → redirects to Okta OIDC login
+2. User clicks "Sign In with Okta" → redirects to Okta OIDC login
 4. After Okta auth, user sees the JIT request form with auto-populated info
 5. User selects request type, duration, provides justification
 6. Portal backend invokes Okta Workflow API via OAuth 2.0 (private key JWT)
@@ -61,16 +60,10 @@ The JIT (Just-In-Time) Admin Request Portal allows NFI Industries users to reque
 │       │                                                              │
 │       ▼                                                              │
 │  ┌─────────────────┐                                                 │
-│  │  Google Cloud    │  ← Static IP: 34.128.181.49                    │
-│  │  Load Balancer   │  ← SSL Certificate (managed)                   │
-│  │  + IAP           │  ← Google Workspace auth (test.nfiindustries)  │
-│  └────────┬────────┘                                                 │
-│           │                                                          │
-│           ▼                                                          │
-│  ┌─────────────────┐                                                 │
-│  │  Cloud Run       │  ← Node.js/Express app                        │
+│  │  Cloud Run       │  ← Native HTTPS (no LB needed)                 │
 │  │  jit-admin-portal│  ← Port 8080                                   │
-│  │  (us-central1)   │  ← Secrets from GCP Secret Manager             │
+│  │  (us-central1)   │  ← Runs as jit-portal-runner SA                │
+│  │                  │  ← Secrets from GCP Secret Manager             │
 │  └────────┬────────┘                                                 │
 │           │                                                          │
 │     ┌─────┴──────┐                                                   │
@@ -97,9 +90,8 @@ The JIT (Just-In-Time) Admin Request Portal allows NFI Industries users to reque
 
 | Layer | Service | Purpose |
 |-------|---------|---------|
-| Layer 1 | Google IAP (Identity-Aware Proxy) | Authenticates user via Google Workspace |
-| Layer 2 | Okta OIDC | Authenticates user via Okta (ensures Okta identity) |
-| Layer 3 | OAuth 2.0 Private Key JWT | Backend authenticates to Okta Workflows API |
+| Layer 1 | Okta OIDC | Authenticates user via Okta (ensures Okta identity) |
+| Layer 2 | OAuth 2.0 Private Key JWT | Backend authenticates to Okta Workflows API |
 
 ---
 
@@ -126,10 +118,6 @@ The JIT (Just-In-Time) Admin Request Portal allows NFI Industries users to reque
 | Container Hosting | Google Cloud Run |
 | Container Registry | Google Artifact Registry |
 | Secrets Management | Google Secret Manager |
-| Load Balancer | Google Cloud HTTPS Load Balancer (External Managed) |
-| Authentication Proxy | Google Identity-Aware Proxy (IAP) |
-| SSL Certificate | Google Managed SSL Certificate |
-| Static IP | Google Cloud Global Static IP |
 | Container Build | Google Cloud Build |
 
 ---
@@ -143,9 +131,9 @@ The JIT (Just-In-Time) Admin Request Portal allows NFI Industries users to reque
 | **Project ID** | `jit-admin-portal` |
 | **Project Number** | `65719149240` |
 | **Region** | `us-central1` |
-| **Static IP** | `34.128.181.49` |
-| **App URL (via LB)** | `https://34.128.181.49.nip.io` |
-| **Cloud Run URL (direct)** | `https://jit-admin-portal-65719149240.us-central1.run.app` |
+| **Cloud Run URL** | Auto-assigned by Cloud Run (e.g., `https://jit-admin-portal-xxxx.us-central1.run.app`) |
+| **Runner SA** | `jit-portal-runner@jit-admin-portal.iam.gserviceaccount.com` |
+| **Invoker SA** | `jit-portal-invoker@jit-admin-portal.iam.gserviceaccount.com` |
 
 ### GCP Resources Created
 
@@ -154,58 +142,46 @@ The JIT (Just-In-Time) Admin Request Portal allows NFI Industries users to reque
 | Cloud Run Service | `jit-admin-portal` | Service |
 | Artifact Registry Repo | `jit-portal-repo` | Docker Repository |
 | Container Image | `us-central1-docker.pkg.dev/jit-admin-portal/jit-portal-repo/jit-admin-portal` | Docker Image |
-| Network Endpoint Group | `jit-portal-neg` | Serverless NEG |
-| Backend Service | `jit-portal-backend` | Global Backend |
-| URL Map | `jit-portal-url-map` | URL Map |
-| SSL Certificate | `jit-portal-cert` | Managed SSL |
-| Static IP | `jit-portal-ip` | Global External IP |
-| HTTPS Proxy | `jit-portal-https-proxy` | Target HTTPS Proxy |
-| Forwarding Rule | `jit-portal-forwarding-rule` | Global Forwarding Rule |
+| Runner Service Account | `jit-portal-runner` | IAM Service Account |
+| Invoker Service Account | `jit-portal-invoker` | IAM Service Account |
 
 ### GCP APIs Enabled
 
 - `run.googleapis.com`
 - `cloudbuild.googleapis.com`
 - `secretmanager.googleapis.com`
-- `containerregistry.googleapis.com`
 - `artifactregistry.googleapis.com`
-- `iap.googleapis.com`
-- `compute.googleapis.com`
 
 ### IAM Roles Assigned
 
 | Service Account | Role |
 |----------------|------|
-| `65719149240-compute@developer.gserviceaccount.com` | `roles/storage.objectAdmin` |
-| `65719149240-compute@developer.gserviceaccount.com` | `roles/artifactregistry.writer` |
-| `65719149240-compute@developer.gserviceaccount.com` | `roles/logging.logWriter` |
-| `65719149240-compute@developer.gserviceaccount.com` | `roles/secretmanager.secretAccessor` |
+| `jit-portal-runner@jit-admin-portal.iam.gserviceaccount.com` | `roles/secretmanager.secretAccessor` |
+| `jit-portal-runner@jit-admin-portal.iam.gserviceaccount.com` | `roles/logging.logWriter` |
 | `65719149240@cloudbuild.gserviceaccount.com` | `roles/storage.objectAdmin` |
 | `65719149240@cloudbuild.gserviceaccount.com` | `roles/storage.admin` |
 | `65719149240@cloudbuild.gserviceaccount.com` | `roles/artifactregistry.writer` |
 | `65719149240@cloudbuild.gserviceaccount.com` | `roles/run.admin` |
-| `65719149240@cloudbuild.gserviceaccount.com` | `roles/iam.serviceAccountUser` |
-| `service-65719149240@gcp-sa-iap.iam.gserviceaccount.com` | `roles/run.invoker` (on Cloud Run service) |
+| `65719149240@cloudbuild.gserviceaccount.com` | `roles/iam.serviceAccountUser` (on runner SA) |
+| `jit-portal-invoker@jit-admin-portal.iam.gserviceaccount.com` | `roles/run.invoker` (on Cloud Run service) |
 
 ### Cloud Run IAM Policy
 
 ```yaml
 bindings:
 - members:
-  - domain:test.nfiindustries.com
-  - serviceAccount:service-65719149240@gcp-sa-iap.iam.gserviceaccount.com
-  - user:victor.vo@test.nfiindustries.com
+  - serviceAccount:jit-portal-invoker@jit-admin-portal.iam.gserviceaccount.com
   role: roles/run.invoker
 ```
 
-### IAP Configuration
+### Service Account Configuration
 
 | Setting | Value |
 |---------|-------|
-| OAuth Client ID | `65719149240-8u8259ml1bt1gbj443lo3ft213t5c93a.apps.googleusercontent.com` |
-| Authorized Redirect URI | `https://iap.googleapis.com/v1/oauth/clientIds/65719149240-8u8259ml1bt1gbj443lo3ft213t5c93a.apps.googleusercontent.com:handleRedirect` |
-| IAP Access (user) | `victor.vo@test.nfiindustries.com` → `roles/iap.httpsResourceAccessor` |
-| IAP Access (domain) | `test.nfiindustries.com` → `roles/iap.httpsResourceAccessor` |
+| Runner SA | `jit-portal-runner@jit-admin-portal.iam.gserviceaccount.com` |
+| Runner SA Purpose | Cloud Run runtime identity (reads secrets, writes logs) |
+| Invoker SA | `jit-portal-invoker@jit-admin-portal.iam.gserviceaccount.com` |
+| Invoker SA Purpose | Authorized to invoke the Cloud Run service (replaces allUsers/IAP) |
 
 ### Organization Policy Constraint
 
@@ -213,7 +189,8 @@ The org policy `iam.allowedPolicyMemberDomains` restricts IAM policy members to 
 - ❌ `allUsers` is blocked (no public access to Cloud Run)
 - ❌ `allAuthenticatedUsers` may be blocked
 - ✅ `user:` and `domain:` within `test.nfiindustries.com` are allowed
-- ✅ IAP is required for browser-based access
+- ✅ Service accounts within the project domain are allowed
+- ✅ `jit-portal-invoker` SA used instead of `allUsers` for Cloud Run access
 
 ---
 
@@ -234,8 +211,8 @@ The org policy `iam.allowedPolicyMemberDomains` restricts IAM policy members to 
 | **Sign-in Method** | OIDC - OpenID Connect |
 | **Application Type** | Web Application |
 | **Grant Types** | Authorization Code |
-| **Sign-in Redirect URI** | `https://34.128.181.49.nip.io/authorization-code/callback` |
-| **Sign-out Redirect URI** | `https://34.128.181.49.nip.io` |
+| **Sign-in Redirect URI** | Cloud Run service URL + `/authorization-code/callback` |
+| **Sign-out Redirect URI** | Cloud Run service URL |
 | **Scopes** | `openid`, `profile`, `email` |
 | **Client ID** | Stored in GCP Secret: `jit-portal-okta-client-id` |
 | **Client Secret** | Stored in GCP Secret: `jit-portal-okta-client-secret` |
@@ -384,7 +361,7 @@ CMD ["node", "src/server.js"]
 |----------|-------|
 | `NODE_ENV` | `production` |
 | `OKTA_ORG_URL` | `https://nfi.oktapreview.com` |
-| `APP_BASE_URL` | `https://34.128.181.49.nip.io` |
+| `APP_BASE_URL` | Cloud Run service URL (auto-detected by deploy.sh) |
 | `PORT` | `8080` (set by Cloud Run) |
 
 ---
@@ -398,23 +375,24 @@ CMD ["node", "src/server.js"]
 export PROJECT_ID="jit-admin-portal"
 export REGION="us-central1"
 export OKTA_ORG_URL="https://nfi.oktapreview.com"
-export SERVICE_URL="https://34.128.181.49.nip.io"
+export RUNNER_SA="jit-portal-runner@${PROJECT_ID}.iam.gserviceaccount.com"
 
 # Build container
 cd ~/jit-portal
 gcloud builds submit --tag $REGION-docker.pkg.dev/$PROJECT_ID/jit-portal-repo/jit-admin-portal
 
-# Deploy to Cloud Run
+# Deploy to Cloud Run with dedicated service account
 gcloud run deploy jit-admin-portal \
   --image $REGION-docker.pkg.dev/$PROJECT_ID/jit-portal-repo/jit-admin-portal:latest \
   --platform managed \
   --region $REGION \
   --no-allow-unauthenticated \
+  --service-account $RUNNER_SA \
   --port 8080 \
   --memory 512Mi \
   --set-env-vars "NODE_ENV=production" \
   --set-env-vars "OKTA_ORG_URL=$OKTA_ORG_URL" \
-  --set-env-vars "APP_BASE_URL=$SERVICE_URL" \
+  --set-env-vars "APP_BASE_URL=$(gcloud run services describe jit-admin-portal --region $REGION --format='value(status.url)' 2>/dev/null || echo 'TBD')" \
   --update-secrets "SESSION_SECRET=jit-portal-session-secret:latest" \
   --update-secrets "OKTA_CLIENT_ID=jit-portal-okta-client-id:latest" \
   --update-secrets "OKTA_CLIENT_SECRET=jit-portal-okta-client-secret:latest" \
@@ -433,9 +411,8 @@ gcloud run deploy jit-admin-portal \
 | Artifact Registry push denied | Missing IAM role | Created Artifact Registry repo + added `roles/artifactregistry.writer` |
 | Secret Manager access denied | Missing IAM role | Added `roles/secretmanager.secretAccessor` to compute SA |
 | Container failed to start | Missing `APP_BASE_URL` env var | Updated server.js with error handling; set all env vars in single deploy |
-| 403 Forbidden on Cloud Run URL | Org policy blocks `allUsers` | Set up IAP with Load Balancer |
-| IAP redirect_uri_mismatch | Missing redirect URI in OAuth | Added exact `handleRedirect` URI to OAuth client |
-| IAP service account not provisioned | Missing IAP SA | Created via `gcloud beta services identity create --service=iap.googleapis.com` |
+| 403 Forbidden on Cloud Run URL | Org policy blocks `allUsers` | Use `jit-portal-invoker` service account with `roles/run.invoker` |
+| IAM policy domain restriction | Org policy `iam.allowedPolicyMemberDomains` | Use project-scoped service accounts instead of `allUsers` |
 | `OKTA_ORG_URL` not set after update | Env vars reset on update | Included all env vars in single deploy command |
 
 ---
@@ -445,12 +422,12 @@ gcloud run deploy jit-admin-portal \
 ### ✅ What's Working
 
 - Application builds and deploys to Cloud Run
-- IAP is configured with SSL certificate on load balancer at `34.128.181.49`
-- Google Workspace authentication via IAP works
-- App loads through IAP (shows JIT Portal landing page)
+- Cloud Run configured with `--no-allow-unauthenticated`
+- Dedicated runner service account (`jit-portal-runner`) for Cloud Run runtime
+- Dedicated invoker service account (`jit-portal-invoker`) with `roles/run.invoker`
 - All secrets stored in GCP Secret Manager
-- IAP redirect URI configured correctly
-- IAP service account has Cloud Run invoker permission
+- Runner SA has `roles/secretmanager.secretAccessor` and `roles/logging.logWriter`
+- Load balancer infrastructure removed (direct Cloud Run access)
 
 ### ❌ Current Blocker
 
@@ -495,7 +472,7 @@ This is **NOT** an app assignment issue (that was fixed). This is an **Okta Auth
    - Edit the policy to allow access from any network/device
    - Create a new permissive policy and assign it to this app
    - Add a rule that allows the app to work from any location
-4. Test sign-in again at `https://34.128.181.49.nip.io`
+4. Test sign-in again at the Cloud Run service URL
 
 ### After Okta Auth is Working
 
@@ -506,12 +483,11 @@ This is **NOT** an app assignment issue (that was fixed). This is an **Okta Auth
 5. **Build the deactivation workflow** (`JIT-Admin-Expire`)
 6. **Configure Google Chat (Gspace) notifications**
 7. **Add Bookmark App** tile in Okta dashboard for easy access
-8. **Set up proper DNS** instead of nip.io for production
+8. **Set up custom domain** via Cloud Run domain mapping for production (optional)
 
 ### Production Readiness
 
-- [ ] Replace nip.io with a proper domain
-- [ ] Configure proper SSL certificate for domain
+- [ ] Configure custom domain via Cloud Run domain mapping (optional)
 - [ ] Set up monitoring and alerting
 - [ ] Create Okta groups and assign users
 - [ ] Test approval workflow
@@ -530,7 +506,6 @@ gcloud auth login
 export PROJECT_ID="jit-admin-portal"
 export REGION="us-central1"
 export OKTA_ORG_URL="https://nfi.oktapreview.com"
-export SERVICE_URL="https://34.128.181.49.nip.io"
 gcloud config set project $PROJECT_ID
 ```
 
@@ -546,16 +521,10 @@ gcloud run services logs read jit-admin-portal --region us-central1 --limit 50
 gcloud run services describe jit-admin-portal --region us-central1
 ```
 
-### Check IAP Status
+### Check Service Account Permissions
 
 ```bash
-gcloud compute backend-services describe jit-portal-backend --global --format="yaml(iap)"
-```
-
-### Check SSL Certificate Status
-
-```bash
-gcloud compute ssl-certificates describe jit-portal-cert --global --format="get(managed.status)"
+gcloud run services get-iam-policy jit-admin-portal --region us-central1
 ```
 
 ### Rebuild & Redeploy
@@ -564,16 +533,19 @@ gcloud compute ssl-certificates describe jit-portal-cert --global --format="get(
 cd ~/jit-portal
 gcloud builds submit --tag us-central1-docker.pkg.dev/jit-admin-portal/jit-portal-repo/jit-admin-portal
 
+CLOUD_RUN_URL=$(gcloud run services describe jit-admin-portal --region us-central1 --format='value(status.url)')
+
 gcloud run deploy jit-admin-portal \
   --image us-central1-docker.pkg.dev/jit-admin-portal/jit-portal-repo/jit-admin-portal:latest \
   --platform managed \
   --region us-central1 \
   --no-allow-unauthenticated \
+  --service-account jit-portal-runner@jit-admin-portal.iam.gserviceaccount.com \
   --port 8080 \
   --memory 512Mi \
   --set-env-vars "NODE_ENV=production" \
   --set-env-vars "OKTA_ORG_URL=https://nfi.oktapreview.com" \
-  --set-env-vars "APP_BASE_URL=https://34.128.181.49.nip.io" \
+  --set-env-vars "APP_BASE_URL=${CLOUD_RUN_URL}" \
   --update-secrets "SESSION_SECRET=jit-portal-session-secret:latest" \
   --update-secrets "OKTA_CLIENT_ID=jit-portal-okta-client-id:latest" \
   --update-secrets "OKTA_CLIENT_SECRET=jit-portal-okta-client-secret:latest" \
@@ -589,7 +561,7 @@ gcloud run deploy jit-admin-portal \
 echo -n "new-value" | gcloud secrets versions add SECRET_NAME --data-file=-
 ```
 
-### Proxy for Local Testing (Bypasses IAP)
+### Proxy for Local Testing
 
 ```bash
 gcloud run services proxy jit-admin-portal --region us-central1 --port 8081

@@ -2,7 +2,7 @@
 
 **Version 2.0.0** | Node.js 20 | Google Cloud Run | Okta OIDC
 
-A production-hardened web portal for NFI Industries that enables authorized users to request temporary (Just-In-Time) privileged admin access. Requests are authenticated through Google IAP and Okta OIDC, authorized via Okta group membership, and fulfilled by invoking an Okta Workflow.
+A production-hardened web portal for NFI Industries that enables authorized users to request temporary (Just-In-Time) privileged admin access. Requests are authenticated through Okta OIDC, authorized via Okta group membership, and fulfilled by invoking an Okta Workflow. The app runs directly on Google Cloud Run with a dedicated service account for invocation (no load balancer).
 
 ---
 
@@ -31,44 +31,39 @@ A production-hardened web portal for NFI Industries that enables authorized user
 User (Browser)
   |
   v
-Google Cloud HTTPS Load Balancer (SSL termination, static IP 34.128.181.49)
-  |
-  v
-Google Identity-Aware Proxy (Layer 1 - Google Workspace auth)
-  |
-  v
 Cloud Run: jit-admin-portal (Express.js on port 8080)
+  |       ← HTTPS provided natively by Cloud Run
+  |       ← Authenticated via service account (jit-portal-invoker)
+  |       ← Runs as service account (jit-portal-runner)
   |
-  +--> Okta OIDC (@okta/oidc-middleware)  (Layer 2 - Okta identity)
+  +--> Okta OIDC (@okta/oidc-middleware)  (Layer 1 - Okta identity)
   |      |
   |      +--> ID Token "JIT-groups" claim --> Group-based authorization
   |
-  +--> Okta Workflows API  (Layer 3 - OAuth 2.0 Private Key JWT)
+  +--> Okta Workflows API  (Layer 2 - OAuth 2.0 Private Key JWT)
          |
          +--> JIT-Admin-Request workflow (processes access request)
 ```
 
-### Three Authentication Layers
+### Two Authentication Layers
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| 1 | Google Identity-Aware Proxy (IAP) | Verifies user belongs to Google Workspace (`test.nfiindustries.com`). Blocks all unauthenticated traffic before it reaches the app. |
-| 2 | Okta OIDC (Authorization Code flow) | Verifies Okta identity via `nfi.oktapreview.com/oauth2/default`. ID token carries the `JIT-groups` custom claim for authorization. |
-| 3 | OAuth 2.0 Private Key JWT (RS256) | Machine-to-machine auth for the backend to invoke the Okta Workflows API with `client_credentials` grant. |
+| 1 | Okta OIDC (Authorization Code flow) | Verifies Okta identity via `nfi.oktapreview.com/oauth2/default`. ID token carries the `JIT-groups` custom claim for authorization. |
+| 2 | OAuth 2.0 Private Key JWT (RS256) | Machine-to-machine auth for the backend to invoke the Okta Workflows API with `client_credentials` grant. |
 
 ---
 
 ## Authentication Flow
 
-1. User navigates to `https://34.128.181.49.nip.io`
-2. Google IAP intercepts and requires Google Workspace sign-in
-3. After IAP passes, the Express app serves the landing page
-4. User clicks "Sign In with Okta" which redirects to Okta's `/authorize` endpoint
-5. Okta authenticates the user and redirects back to `/authorization-code/callback`
-6. The OIDC middleware validates the tokens and creates a session
-7. The authorization middleware decodes the ID token, reads the `JIT-groups` claim, and verifies the user is in the `JIT-Eligible-Users` group
-8. User sees the dashboard and can submit JIT access requests
-9. On form submission, the server authenticates to the Okta Workflows API using a private key JWT, obtains a bearer token, and invokes the `JIT-Admin-Request` workflow
+1. User navigates to the Cloud Run service URL
+2. The Express app serves the landing page
+3. User clicks "Sign In with Okta" which redirects to Okta's `/authorize` endpoint
+4. Okta authenticates the user and redirects back to `/authorization-code/callback`
+5. The OIDC middleware validates the tokens and creates a session
+6. The authorization middleware decodes the ID token, reads the `JIT-groups` claim, and verifies the user is in the `JIT-Eligible-Users` group
+7. User sees the dashboard and can submit JIT access requests
+8. On form submission, the server authenticates to the Okta Workflows API using a private key JWT, obtains a bearer token, and invokes the `JIT-Admin-Request` workflow
 
 ---
 
@@ -91,13 +86,10 @@ Cloud Run: jit-admin-portal (Express.js on port 8080)
 
 | Service | Purpose |
 |---------|---------|
-| Google Cloud Run | Container hosting (managed, serverless) |
+| Google Cloud Run | Container hosting (managed, serverless, with native HTTPS) |
 | Google Cloud Build | Container image builds |
 | Google Artifact Registry | Docker image storage |
 | Google Secret Manager | Stores 7 secrets (session key, Okta credentials, workflow keys) |
-| Google HTTPS Load Balancer | SSL termination, static IP routing |
-| Google IAP | Layer 1 authentication (Google Workspace) |
-| Google Managed SSL Certificate | TLS for the load balancer |
 
 ### Okta
 
@@ -145,12 +137,11 @@ jit-admin-portal/
 
 ### Defense-in-Depth Layers
 
-1. **Network** -- Google IAP blocks all unauthenticated traffic; Cloud Run set to `--no-allow-unauthenticated`
-2. **Transport** -- HTTPS everywhere; secure cookies enforced in production
+1. **Network** -- Cloud Run set to `--no-allow-unauthenticated`; access restricted to `jit-portal-invoker` service account via `roles/run.invoker`
+2. **Transport** -- HTTPS provided natively by Cloud Run; secure cookies enforced in production
 3. **Headers** -- Helmet sets CSP, X-Frame-Options, X-Content-Type-Options, and more
-4. **Authentication (Google)** -- IAP verifies Google Workspace membership
-5. **Authentication (Okta)** -- OIDC Authorization Code flow with session validation
-6. **Authorization** -- ID token `JIT-groups` claim checked against required group (`JIT-Eligible-Users`)
+4. **Authentication (Okta)** -- OIDC Authorization Code flow with session validation
+5. **Authorization** -- ID token `JIT-groups` claim checked against required group (`JIT-Eligible-Users`)
 7. **Rate Limiting** -- API: 30 requests/hour per user; Pages: 100 requests/15 minutes per user
 8. **Input Validation** -- Schema-based validation with sanitization on all JIT request payloads
 9. **Session Hardening** -- `httpOnly`, `sameSite: lax`, `secure: true`, 1-hour `maxAge`, custom cookie name `jit.sid`
@@ -190,7 +181,7 @@ form-action 'self'
 | `NODE_ENV` | Set in deploy | `production` in Cloud Run |
 | `PORT` | Cloud Run default | `8080` |
 | `OKTA_ORG_URL` | Set in deploy | `https://nfi.oktapreview.com` |
-| `APP_BASE_URL` | Set in deploy | `https://34.128.181.49.nip.io` |
+| `APP_BASE_URL` | Set in deploy | Cloud Run service URL (auto-detected) |
 | `SESSION_SECRET` | Secret Manager | Express session encryption key |
 | `OKTA_CLIENT_ID` | Secret Manager | OIDC web app client ID |
 | `OKTA_CLIENT_SECRET` | Secret Manager | OIDC web app client secret |
@@ -220,30 +211,34 @@ form-action 'self'
 | Project ID | `jit-admin-portal` |
 | Project Number | `65719149240` |
 | Region | `us-central1` |
-| Static IP | `34.128.181.49` (global) |
-| Current Domain | `34.128.181.49.nip.io` |
 | Artifact Registry Repo | `jit-admin-repo` |
+| Runner Service Account | `jit-portal-runner@jit-admin-portal.iam.gserviceaccount.com` |
+| Invoker Service Account | `jit-portal-invoker@jit-admin-portal.iam.gserviceaccount.com` |
 
 ### GCP Resources
 
 - **Cloud Run Service** -- `jit-admin-portal` (managed, us-central1)
 - **Artifact Registry** -- `jit-admin-repo` (Docker format, us-central1)
-- **HTTPS Load Balancer** -- URL map, backend service, serverless NEG
-- **SSL Certificate** -- Google-managed certificate for the domain
-- **IAP** -- Configured for the backend service; grants access to `test.nfiindustries.com` domain
 - **Secret Manager** -- 7 secrets storing all credentials
 - **Cloud Build** -- Builds Docker images from source
 
+### Service Accounts
+
+| Service Account | Purpose |
+|----------------|--------|
+| `jit-portal-runner` | Cloud Run runtime identity (reads secrets, writes logs) |
+| `jit-portal-invoker` | Authorized to invoke the Cloud Run service (`roles/run.invoker`) |
+
 ### IAM
 
-- Compute service account: storage, artifact registry, logging, secret manager roles
-- Cloud Build service account: Cloud Run deployer
-- IAP service account: Cloud Run invoker
+- Runner SA: `roles/secretmanager.secretAccessor`, `roles/logging.logWriter`
+- Invoker SA: `roles/run.invoker` (on Cloud Run service)
+- Cloud Build SA: `roles/run.admin`, `roles/iam.serviceAccountUser` (on runner SA)
 - Organization policy: `iam.allowedPolicyMemberDomains` restricts to customer ID `C012imv50`
 
 ### APIs Enabled
 
-`run.googleapis.com`, `cloudbuild.googleapis.com`, `secretmanager.googleapis.com`, `iap.googleapis.com`, `compute.googleapis.com`, `artifactregistry.googleapis.com`
+`run.googleapis.com`, `cloudbuild.googleapis.com`, `secretmanager.googleapis.com`, `artifactregistry.googleapis.com`
 
 ---
 
@@ -259,8 +254,8 @@ form-action 'self'
 | Sign-in method | OIDC |
 | Application type | Web Application |
 | Grant type | Authorization Code |
-| Sign-in redirect URI | `https://34.128.181.49.nip.io/authorization-code/callback` |
-| Sign-out redirect URI | `https://34.128.181.49.nip.io` |
+| Sign-in redirect URI | Cloud Run service URL + `/authorization-code/callback` |
+| Sign-out redirect URI | Cloud Run service URL |
 | Scopes | `openid`, `profile`, `email` |
 | Authorization Server | `default` (`/oauth2/default`) |
 
@@ -319,10 +314,10 @@ The `default` authorization server must have an Access Policy that allows the JI
 ### Quick Deploy (using deploy.sh)
 
 ```bash
-# Default deployment (uses nip.io domain)
+# Default deployment (uses Cloud Run native URL)
 ./deploy.sh
 
-# With custom domain
+# With custom domain (Cloud Run domain mapping)
 ./deploy.sh --domain jit.nfiindustries.com
 
 # Build container only (no deploy)
@@ -485,19 +480,21 @@ gcloud builds submit \
   --region us-central1
 ```
 
-**Check IAP status:**
+**Check service account permissions:**
 ```bash
-gcloud compute backend-services describe jit-portal-backend --global
+gcloud run services get-iam-policy jit-admin-portal --region us-central1
 ```
 
-**Check SSL certificate status:**
+**Check invoker SA binding:**
 ```bash
-gcloud compute ssl-certificates describe jit-portal-cert --global
+gcloud run services get-iam-policy jit-admin-portal --region us-central1 --format='yaml(bindings)'
 ```
 
 **Test health check:**
 ```bash
-curl -s https://34.128.181.49.nip.io/health | python3 -m json.tool
+# Get identity token for the invoker SA, then curl
+CLOUD_RUN_URL=$(gcloud run services describe jit-admin-portal --region us-central1 --format='value(status.url)')
+curl -s "${CLOUD_RUN_URL}/health" -H "Authorization: Bearer $(gcloud auth print-identity-token)" | python3 -m json.tool
 ```
 
 ---
@@ -571,8 +568,8 @@ Check Cloud Run logs for the specific error. Common causes:
 
 ## Known Issues and Notes
 
-- **nip.io domain**: The app uses `34.128.181.49.nip.io` as a temporary hostname. For production, configure a proper DNS A record pointing to `34.128.181.49` and update Okta redirect URIs accordingly.
 - **In-memory sessions**: Sessions are stored in-memory (default Express session store). Sessions are lost when Cloud Run instances restart or scale. For multi-instance or persistent sessions, add a Redis-backed session store (e.g., Google Cloud Memorystore).
 - **Okta preview environment**: The Okta org `nfi.oktapreview.com` is a preview/sandbox environment. For production, update `OKTA_ORG_URL` to the production Okta org and reconfigure both Okta applications.
 - **Repo name mismatch**: `deploy.sh` references `jit-portal-repo` while the Artifact Registry was created as `jit-admin-repo`. Either update the script or use manual deploy commands.
 - **Okta Workflow**: The `JIT-Admin-Request` workflow in Okta Workflows needs to be built to handle the incoming request payload (requestType, duration, justification, requestor info) and implement the approval/provisioning logic.
+- **Custom domain**: For production, use `./deploy.sh --domain your-domain.com` to set up Cloud Run domain mapping with a proper hostname. Update Okta redirect URIs to match.

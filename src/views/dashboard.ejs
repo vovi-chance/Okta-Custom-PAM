@@ -8,7 +8,7 @@
 </head>
 <body>
   <nav class="navbar">
-    <h1>&#128274; JIT Admin Portal</h1>
+    <h1><span class="tailwind-icon" aria-hidden="true"></span> JIT Admin Portal</h1>
     <div class="navbar-right">
       <span class="user-badge"><%= user.name %></span>
       <a href="/profile">Profile</a>
@@ -20,38 +20,6 @@
     <!-- Status alerts -->
     <div id="alert-success" class="alert alert-success"></div>
     <div id="alert-error" class="alert alert-error"></div>
-
-    <!-- Request types info card -->
-    <div class="card">
-      <h2>Request Types</h2>
-      <p class="card-subtitle">Available JIT admin access request types</p>
-      <table class="request-types-table">
-        <thead>
-          <tr>
-            <th>Type</th>
-            <th>Duration</th>
-            <th>Approval</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><strong>Standard</strong></td>
-            <td><%= durationRanges.standard.min %>-<%= durationRanges.standard.max %> min</td>
-            <td>Manager approval</td>
-          </tr>
-          <tr>
-            <td><strong>Emergency</strong></td>
-            <td><%= durationRanges.emergency.min %>-<%= durationRanges.emergency.max %> min</td>
-            <td>Auto-approved</td>
-          </tr>
-          <tr>
-            <td><strong>Extended</strong></td>
-            <td><%= durationRanges.extended.min %>-<%= durationRanges.extended.max %> min</td>
-            <td>Manager approval</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
 
     <!-- Request form -->
     <div class="card">
