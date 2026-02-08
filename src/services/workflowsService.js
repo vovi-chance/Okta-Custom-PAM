@@ -1,7 +1,7 @@
 'use strict';
 
-const { SignJWT, importJWK, exportJWK } = require('jose');
-const { createPrivateKey, createPublicKey } = require('crypto');
+const { SignJWT, importJWK } = require('jose');
+const { createPrivateKey } = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { logger } = require('../utils/logger');
 
@@ -11,7 +11,6 @@ let tokenExpiresAt = 0;
 
 // Cache for parsed private key (to avoid re-parsing on every request)
 let cachedPrivateKey = null;
-let cachedPublicJwk = null;
 
 // Circuit breaker state
 const circuit = {
@@ -127,23 +126,7 @@ async function generateClientAssertion() {
     }
   }
 
-  // Cache the private key and derive public JWK for DPoP
   cachedPrivateKey = privateKey;
-
-  // Export public key as JWK for DPoP header
-  try {
-    const publicJwk = await exportJWK(privateKey);
-    // Remove private key components, keep only public
-    delete publicJwk.d;
-    delete publicJwk.p;
-    delete publicJwk.q;
-    delete publicJwk.dp;
-    delete publicJwk.dq;
-    delete publicJwk.qi;
-    cachedPublicJwk = publicJwk;
-  } catch (exportErr) {
-    logger.warn('Could not export public JWK for DPoP', { error: exportErr.message });
-  }
 
   const now = Math.floor(Date.now() / 1000);
   const jwt = await new SignJWT({})
@@ -157,57 +140,6 @@ async function generateClientAssertion() {
     .sign(privateKey);
 
   return { jwt, privateKey };
-}
-
-/**
- * Generates a DPoP (Demonstrating Proof of Possession) proof JWT.
- * Required when the Okta client is configured with DPoP.
- * @param {CryptoKey} privateKey - The private key to sign with
- * @param {string} httpMethod - HTTP method (GET, POST, etc.)
- * @param {string} httpUri - Full HTTP URI (without query string)
- * @param {string|null} accessToken - Access token for ath claim (API calls only)
- * @param {string|null} nonce - Server-provided nonce value
- */
-async function generateDpopProof(privateKey, httpMethod, httpUri, accessToken = null, nonce = null) {
-  const now = Math.floor(Date.now() / 1000);
-
-  const header = {
-    alg: 'RS256',
-    typ: 'dpop+jwt',
-  };
-
-  // Include the public key in the header (required for DPoP)
-  if (cachedPublicJwk) {
-    header.jwk = cachedPublicJwk;
-  }
-
-  const payload = {
-    htm: httpMethod, // HTTP method
-    htu: httpUri,    // HTTP URI (without query string)
-    iat: now,
-    jti: uuidv4(),
-  };
-
-  // Include server-provided nonce if available (required by some Okta configs)
-  if (nonce) {
-    payload.nonce = nonce;
-  }
-
-  // If we have an access token, include its hash (for API calls, not token requests)
-  if (accessToken) {
-    const crypto = require('crypto');
-    const tokenHash = crypto
-      .createHash('sha256')
-      .update(accessToken)
-      .digest('base64url');
-    payload.ath = tokenHash;
-  }
-
-  const dpopProof = await new SignJWT(payload)
-    .setProtectedHeader(header)
-    .sign(privateKey);
-
-  return dpopProof;
 }
 
 /**
@@ -314,7 +246,6 @@ function recordFailure() {
 
 /**
  * Invokes the Okta Workflow with retry logic and circuit breaker.
- * Uses DPoP token authentication with proof-of-possession.
  *
  * @param {Object} payload - The workflow payload
  * @returns {Object} - The workflow response

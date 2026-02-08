@@ -74,8 +74,15 @@ function requireGroup(requiredGroup) {
           hasIdToken: !!userContext.tokens?.id_token,
           userinfoClaims: Object.keys(userInfo),
         });
-        return res.status(500).render('error', {
-          title: 'Configuration Error',
+        const isApi = req.path.startsWith('/api/');
+        if (isApi) {
+          return res.status(403).json({
+            success: false,
+            error: 'Group information is not available in your token. Please contact your administrator.',
+          });
+        }
+        return res.status(403).render('error', {
+          title: 'Access Denied',
           message:
             'Group information is not available. Please contact your administrator to configure the groups claim on the authorization server.',
         });

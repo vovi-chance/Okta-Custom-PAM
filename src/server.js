@@ -64,10 +64,10 @@ function validateConfig() {
 }
 
 // ──────────────────────────────────────────────────
-// Trust proxy (Cloud Run behind LB / IAP)
+// Trust proxy (Cloud Run behind Google Front End)
 // ──────────────────────────────────────────────────
 
-app.set('trust proxy', true);
+app.set('trust proxy', 1); // Trust only the first proxy (Cloud Run LB)
 
 // ──────────────────────────────────────────────────
 // View engine
@@ -85,8 +85,8 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", 'https://fonts.googleapis.com'],
         fontSrc: ["'self'", 'https://fonts.gstatic.com'],
         imgSrc: ["'self'", 'data:'],
         connectSrc: ["'self'"],
@@ -96,7 +96,7 @@ app.use(
         formAction: ["'self'"],
       },
     },
-    crossOriginEmbedderPolicy: false, // Required for IAP
+    crossOriginEmbedderPolicy: false,
   })
 );
 
@@ -130,7 +130,7 @@ app.use(
     saveUninitialized: false,
     name: 'jit.sid',
     cookie: {
-      secure: isProduction,      // HTTPS only in production
+      secure: isProduction,      // HTTPS 
       httpOnly: true,            // Prevent XSS access to cookie
       sameSite: 'lax',           // CSRF protection
       maxAge: 60 * 60 * 1000,   // 1 hour session timeout
@@ -143,31 +143,16 @@ app.use(
 // ──────────────────────────────────────────────────
 
 app.get('/health', async (req, res) => {
-  const health = {
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    version: require('../package.json').version,
-    checks: {},
-  };
-
-  // Check if OIDC is configured
-  health.checks.oidcConfigured = !!(
+  const oidcConfigured = !!(
     process.env.OKTA_CLIENT_ID && process.env.OKTA_CLIENT_SECRET
   );
 
-  // Check if Workflow API is configured
-  health.checks.workflowConfigured = !!(
-    process.env.OKTA_WORKFLOWS_CLIENT_ID &&
-    process.env.OKTA_WORKFLOWS_INVOKE_URL
-  );
-
-  // Check memory usage
-  const memUsage = process.memoryUsage();
-  health.checks.memoryMB = Math.round(memUsage.rss / 1024 / 1024);
-
-  const allHealthy = health.checks.oidcConfigured;
-  res.status(allHealthy ? 200 : 503).json(health);
+  // Return only minimal status publicly to avoid information disclosure
+  const allHealthy = oidcConfigured;
+  res.status(allHealthy ? 200 : 503).json({
+    status: allHealthy ? 'healthy' : 'unhealthy',
+    timestamp: new Date().toISOString(),
+  });
 });
 
 // ──────────────────────────────────────────────────
@@ -225,10 +210,9 @@ function ensureOidc(req, res, next) {
 // Routes
 // ──────────────────────────────────────────────────
 
-// Landing page
+// Landing page — redirect to dashboard (triggers Okta login if unauthenticated)
 app.get('/', pageLimiter, (req, res) => {
-  const isAuthenticated = !!(req.userContext && req.userContext.userinfo);
-  res.render('home', { isAuthenticated });
+  res.redirect('/dashboard');
 });
 
 // Dashboard — protected by OIDC + group authorization
@@ -276,7 +260,7 @@ app.post(
   validateJitRequest,
   async (req, res) => {
     const userInfo = req.userContext.userinfo;
-    const { requestType, durationMinutes, businessJustification, incidentTicket } =
+    const { requestType, durationMinutes, businessJustification } =
       req.validatedBody;
 
     const payload = {
@@ -285,7 +269,6 @@ app.post(
       requestorName: userInfo.name || userInfo.preferred_username || 'Unknown',
       durationMinutes,
       businessJustification,
-      incidentTicket: incidentTicket || null,
       requestType,
       requestTimestamp: new Date().toISOString(),
       sourceApplication: 'JIT-Admin-Portal',
@@ -327,7 +310,9 @@ app.post(
       const statusCode = err.message.includes('circuit breaker') ? 503 : 502;
       res.status(statusCode).json({
         success: false,
-        error: `Submission Failed: ${err.message}`, // DEBUG: Always expose error
+        error: isProduction
+          ? 'Submission failed. Please try again or contact your administrator.'
+          : `Submission Failed: ${err.message}`,
         debug_stack: isProduction ? undefined : err.stack,
         requestId: req.correlationId,
       });
@@ -335,8 +320,30 @@ app.post(
   }
 );
 
-// Logout
-app.get('/logout', (req, res) => {
+// Logout — revoke token, destroy session, redirect to Okta logout
+app.get('/logout', async (req, res) => {
+  const oktaOrgUrl = process.env.OKTA_ORG_URL;
+  const appBaseUrl = process.env.APP_BASE_URL;
+
+  // Revoke the access token with Okta before destroying the session
+  const accessToken = req.userContext?.tokens?.access_token;
+  if (accessToken && oktaOrgUrl) {
+    try {
+      await fetch(`${oktaOrgUrl}/oauth2/default/v1/revoke`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          token: accessToken,
+          token_type_hint: 'access_token',
+          client_id: process.env.OKTA_CLIENT_ID,
+          client_secret: process.env.OKTA_CLIENT_SECRET,
+        }).toString(),
+      });
+    } catch (err) {
+      logger.warn('Token revocation failed', { error: err.message });
+    }
+  }
+
   if (req.session) {
     req.session.destroy((err) => {
       if (err) {
@@ -344,8 +351,7 @@ app.get('/logout', (req, res) => {
       }
     });
   }
-  const oktaOrgUrl = process.env.OKTA_ORG_URL;
-  const appBaseUrl = process.env.APP_BASE_URL;
+
   if (oktaOrgUrl && appBaseUrl) {
     res.redirect(
       `${oktaOrgUrl}/oauth2/default/v1/logout?post_logout_redirect_uri=${encodeURIComponent(appBaseUrl)}`

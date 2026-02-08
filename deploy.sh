@@ -3,8 +3,8 @@
 # JIT Admin Portal - Production Deployment Script
 #
 # Usage:
-#   ./deploy.sh                     # Deploy with defaults (nip.io domain)
-#   ./deploy.sh --domain jit.nfiindustries.com  # Deploy with custom domain
+#   ./deploy.sh                     # Deploy with defaults
+#   ./deploy.sh --domain custom.example.com  # Deploy with custom domain
 #   ./deploy.sh --build-only        # Build container only, no deploy
 #
 set -euo pipefail
@@ -19,8 +19,7 @@ SERVICE_NAME="jit-admin-portal"
 REPO_NAME="jit-portal-repo"
 IMAGE_NAME="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${SERVICE_NAME}"
 OKTA_ORG_URL="${OKTA_ORG_URL:-https://nfi.oktapreview.com}"
-STATIC_IP="34.128.181.49"
-DEFAULT_DOMAIN="${STATIC_IP}.nip.io"
+DEFAULT_URL="https://jit-admin-portal-65719149240.us-central1.run.app"
 CUSTOM_DOMAIN=""
 BUILD_ONLY=false
 
@@ -59,8 +58,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-APP_DOMAIN="${CUSTOM_DOMAIN:-${DEFAULT_DOMAIN}}"
-SERVICE_URL="https://${APP_DOMAIN}"
+if [ -n "${CUSTOM_DOMAIN}" ]; then
+  SERVICE_URL="https://${CUSTOM_DOMAIN}"
+else
+  SERVICE_URL="${DEFAULT_URL}"
+fi
 
 # ──────────────────────────────────────────────────
 # Preflight checks
@@ -72,7 +74,6 @@ echo "============================================"
 echo ""
 echo "  Project:  ${PROJECT_ID}"
 echo "  Region:   ${REGION}"
-echo "  Domain:   ${APP_DOMAIN}"
 echo "  URL:      ${SERVICE_URL}"
 echo "  Image:    ${IMAGE_NAME}"
 echo ""
@@ -145,7 +146,7 @@ CLOUD_RUN_URL=$(gcloud run services describe "${SERVICE_NAME}" \
   --format='value(status.url)')
 
 echo "      Cloud Run URL: ${CLOUD_RUN_URL}"
-echo "      Public URL:    ${SERVICE_URL}"
+echo "      APP_BASE_URL:  ${SERVICE_URL}"
 
 # Check latest revision
 LATEST_REVISION=$(gcloud run services describe "${SERVICE_NAME}" \
@@ -173,9 +174,8 @@ echo "    3. Check logs:         gcloud run services logs read ${SERVICE_NAME} -
 echo ""
 
 if [ -n "${CUSTOM_DOMAIN}" ]; then
-  echo "  Domain reminder:"
+  echo "  Custom domain reminder:"
   echo "    - Update Okta redirect URI to: ${SERVICE_URL}/authorization-code/callback"
   echo "    - Update Okta sign-out URI to: ${SERVICE_URL}"
-  echo "    - Ensure DNS A record points ${CUSTOM_DOMAIN} to ${STATIC_IP}"
   echo ""
 fi

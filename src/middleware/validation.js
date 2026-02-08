@@ -14,9 +14,6 @@ const VALID_REQUEST_TYPES = Object.keys(DURATION_RANGES);
 const JUSTIFICATION_MIN_LENGTH = 10;
 const JUSTIFICATION_MAX_LENGTH = 1000;
 
-// Ticket format: alphanumeric with hyphens, 3-30 characters
-const TICKET_PATTERN = /^[a-zA-Z0-9-]{3,30}$/;
-
 /**
  * Validates the JIT access request body.
  * Returns 400 with specific error messages on validation failure.
@@ -24,7 +21,7 @@ const TICKET_PATTERN = /^[a-zA-Z0-9-]{3,30}$/;
 function validateJitRequest(req, res, next) {
   const errors = [];
   const body = req.body || {};
-  const { requestType, durationMinutes, businessJustification, incidentTicket } = body;
+  const { requestType, durationMinutes, businessJustification } = body;
 
   // If body parsing failed or no JSON was provided, fail gracefully.
   // (Without this, destructuring from undefined can throw and become a 500.)
@@ -72,17 +69,6 @@ function validateJitRequest(req, res, next) {
     }
   }
 
-  // Validate incident ticket for emergency requests
-  if (requestType === 'emergency') {
-    if (!incidentTicket || typeof incidentTicket !== 'string') {
-      errors.push('Incident ticket number is required for emergency requests.');
-    } else if (!TICKET_PATTERN.test(incidentTicket.trim())) {
-      errors.push(
-        'Incident ticket must be 3-30 characters, alphanumeric with hyphens only.'
-      );
-    }
-  }
-
   if (errors.length > 0) {
     logger.warn('JIT request validation failed', {
       errors,
@@ -101,8 +87,6 @@ function validateJitRequest(req, res, next) {
     requestType,
     durationMinutes: duration,
     businessJustification: businessJustification.trim(),
-    incidentTicket:
-      requestType === 'emergency' ? incidentTicket.trim() : undefined,
   };
 
   next();
