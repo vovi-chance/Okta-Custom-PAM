@@ -13,6 +13,10 @@ const { invokeWorkflow } = require('./services/workflowsService');
 const app = express();
 const PORT = process.env.PORT || 8080;
 const isProduction = process.env.NODE_ENV === 'production';
+const CACHE_BUST = Date.now().toString(36);
+
+// Make cacheBust available to all EJS templates
+app.locals.cacheBust = CACHE_BUST;
 
 // ──────────────────────────────────────────────────
 // Configuration validation
@@ -268,7 +272,7 @@ app.post(
       requestorEmail: userInfo.email,
       requestorName: userInfo.name || userInfo.preferred_username || 'Unknown',
       durationMinutes,
-      businessJustification,
+      businessJustification: businessJustification || undefined,
       requestType,
       requestTimestamp: new Date().toISOString(),
       sourceApplication: 'JIT-Admin-Portal',

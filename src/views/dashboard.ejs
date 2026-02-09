@@ -4,16 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JIT Admin Request - Dashboard</title>
-  <link rel="stylesheet" href="/css/common.css">
-  <link rel="stylesheet" href="/css/dashboard.css">
+  <link rel="stylesheet" href="/css/common.css?v=<%= cacheBust %>">
+  <link rel="stylesheet" href="/css/dashboard.css?v=<%= cacheBust %>">
 </head>
 <body>
   <nav class="navbar">
-    <h1><span class="tailwind-icon" aria-hidden="true"></span> JIT Admin Portal</h1>
-    <div class="navbar-right">
-      <span class="user-badge"><%= user.name %></span>
-      <a href="/profile">Profile</a>
-      <a href="/logout">Sign Out</a>
+    <div class="navbar-inner">
+      <h1><span class="tailwind-icon" aria-hidden="true"></span> JIT Admin Portal</h1>
+      <div class="navbar-right">
+        <span class="user-badge"><%= user.name %></span>
+        <a href="/profile">Profile</a>
+        <a href="/logout">Sign Out</a>
+      </div>
     </div>
   </nav>
 
@@ -30,25 +32,21 @@
         <thead>
           <tr>
             <th>Type</th>
-            <th>Duration</th>
             <th>Approval</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td><strong>Standard</strong></td>
-            <td><%= durationRanges.standard.min %>-<%= durationRanges.standard.max %> min</td>
+            <td>User approval</td>
+          </tr>
+          <tr>
+            <td><strong>Extended</strong></td>
             <td>User approval</td>
           </tr>
           <tr>
             <td><strong>Emergency</strong></td>
-            <td><%= durationRanges.emergency.min %>-<%= durationRanges.emergency.max %> min</td>
             <td>Manager approval</td>
-          </tr>
-          <tr>
-            <td><strong>Extended</strong></td>
-            <td><%= durationRanges.extended.min %>-<%= durationRanges.extended.max %> min</td>
-            <td>User approval</td>
           </tr>
         </tbody>
       </table>
@@ -65,8 +63,8 @@
           <select id="requestType" name="requestType" required>
             <option value="">-- Select type --</option>
             <option value="standard">Standard</option>
-            <option value="emergency">Emergency</option>
             <option value="extended">Extended</option>
+            <option value="emergency">Emergency</option>
           </select>
           <div id="info-standard" class="type-info">
             Standard request: User approval required. Duration <%= durationRanges.standard.min %>-<%= durationRanges.standard.max %> minutes.
@@ -75,20 +73,26 @@
             Emergency request: Manager approval required. Duration <%= durationRanges.emergency.min %>-<%= durationRanges.emergency.max %> minutes.
           </div>
           <div id="info-extended" class="type-info">
-            Extended request: User approval required. Duration <%= durationRanges.extended.min %>-<%= durationRanges.extended.max %> minutes.
+            Extended request: User approval required.
           </div>
         </div>
 
         <div class="form-group">
-          <label for="durationMinutes">Duration (minutes)</label>
-          <input type="number" id="durationMinutes" name="durationMinutes" required min="15" max="480" placeholder="30">
+          <label for="durationMinutes">Duration</label>
+          <div class="duration-row">
+            <select id="durationUnit">
+              <option value="minutes">Minutes</option>
+              <option value="hours">Hours</option>
+            </select>
+            <input type="number" id="durationMinutes" name="durationMinutes" required min="15" max="480" placeholder="15">
+          </div>
           <div id="duration-hint" class="duration-hint"></div>
         </div>
 
-        <div class="form-group">
+        <div class="form-group" id="justification-group" style="display: none;">
           <label for="businessJustification">Business Justification</label>
           <p class="hint">Minimum 10 characters. Explain why admin access is needed.</p>
-          <textarea id="businessJustification" name="businessJustification" required minlength="10" maxlength="1000" placeholder="Describe the reason for requesting admin access..."></textarea>
+          <textarea id="businessJustification" name="businessJustification" minlength="10" maxlength="1000" placeholder="Describe the reason for requesting admin access..."></textarea>
         </div>
 
         <button type="submit" id="submit-btn" class="btn btn-primary">
@@ -98,6 +102,6 @@
     </div>
   </div>
 
-  <script src="/js/dashboard.js"></script>
+  <script src="/js/dashboard.js?v=<%= cacheBust %>"></script>
 </body>
 </html>

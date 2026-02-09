@@ -8,7 +8,7 @@
 .card-subtitle {
   color: #666;
   font-size: 14px;
-  margin-bottom: 24px;
+  margin-bottom: 12px;
 }
 .form-group { margin-bottom: 20px; }
 .form-group label {
@@ -59,6 +59,19 @@ textarea { resize: vertical; min-height: 100px; }
 }
 .alert-success { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
 .alert-error { background: #ffeef0; color: #c62828; border: 1px solid #ffcdd2; }
+.duration-row {
+  display: flex;
+  gap: 10px;
+}
+.duration-row select {
+  width: 140px;
+  min-width: 140px;
+  flex: 0 0 140px;
+}
+.duration-row input {
+  width: auto;
+  flex: 1;
+}
 .duration-hint {
   font-size: 12px;
   color: #666;
@@ -80,10 +93,10 @@ textarea { resize: vertical; min-height: 100px; }
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 .request-types-table th, .request-types-table td {
-  padding: 8px 12px;
+  padding: 6px 12px;
   text-align: left;
   border-bottom: 1px solid #eee;
 }

@@ -8,7 +8,12 @@ body {
 .navbar {
   background: #0052cc;
   color: #fff;
-  padding: 16px 32px;
+  padding: 16px 0;
+}
+.navbar-inner {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 0 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -18,16 +23,16 @@ body {
 .navbar a { color: #fff; text-decoration: none; font-size: 14px; opacity: 0.9; }
 .navbar a:hover { opacity: 1; }
 .main {
-  max-width: 720px;
-  margin: 32px auto;
+  max-width: 640px;
+  margin: 20px auto;
   padding: 0 16px;
 }
 .card {
   background: #fff;
   border-radius: 12px;
   box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-  padding: 32px;
-  margin-bottom: 24px;
+  padding: 24px 32px;
+  margin-bottom: 16px;
 }
 .card h2 {
   font-size: 20px;

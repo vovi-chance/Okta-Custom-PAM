@@ -6,7 +6,7 @@ const { logger } = require('../utils/logger');
 const DURATION_RANGES = {
   standard: { min: 15, max: 240 },
   emergency: { min: 15, max: 480 },
-  extended: { min: 60, max: 480 },
+  extended: { min: 15, max: 480 },
 };
 
 const VALID_REQUEST_TYPES = Object.keys(DURATION_RANGES);
@@ -52,20 +52,22 @@ function validateJitRequest(req, res, next) {
     }
   }
 
-  // Validate business justification
-  if (!businessJustification || typeof businessJustification !== 'string') {
-    errors.push('Business justification is required.');
-  } else {
-    const trimmed = businessJustification.trim();
-    if (trimmed.length < JUSTIFICATION_MIN_LENGTH) {
-      errors.push(
-        `Business justification must be at least ${JUSTIFICATION_MIN_LENGTH} characters.`
-      );
-    }
-    if (trimmed.length > JUSTIFICATION_MAX_LENGTH) {
-      errors.push(
-        `Business justification must be no more than ${JUSTIFICATION_MAX_LENGTH} characters.`
-      );
+  // Validate business justification (required for standard and emergency, not extended)
+  if (requestType !== 'extended') {
+    if (!businessJustification || typeof businessJustification !== 'string') {
+      errors.push('Business justification is required.');
+    } else {
+      const trimmed = businessJustification.trim();
+      if (trimmed.length < JUSTIFICATION_MIN_LENGTH) {
+        errors.push(
+          `Business justification must be at least ${JUSTIFICATION_MIN_LENGTH} characters.`
+        );
+      }
+      if (trimmed.length > JUSTIFICATION_MAX_LENGTH) {
+        errors.push(
+          `Business justification must be no more than ${JUSTIFICATION_MAX_LENGTH} characters.`
+        );
+      }
     }
   }
 
@@ -86,8 +88,11 @@ function validateJitRequest(req, res, next) {
   req.validatedBody = {
     requestType,
     durationMinutes: duration,
-    businessJustification: businessJustification.trim(),
   };
+
+  if (requestType !== 'extended' && businessJustification) {
+    req.validatedBody.businessJustification = businessJustification.trim();
+  }
 
   next();
 }
