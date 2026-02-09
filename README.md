@@ -54,13 +54,12 @@ Cloud Run: jit-admin-portal (Express.js on port 8080)
 ## Authentication Flow
 
 1. User navigates to `https://jit-admin-portal-65719149240.us-central1.run.app`
-2. The Express app serves the landing page
-3. User clicks "Sign In with Okta" which redirects to Okta's `/authorize` endpoint
-5. Okta authenticates the user and redirects back to `/authorization-code/callback`
-6. The OIDC middleware validates the tokens and creates a session
-7. The authorization middleware decodes the ID token, reads the `JIT-groups` claim, and verifies the user is in the `JIT-Eligible-Users` group
-8. User sees the dashboard and can submit JIT access requests
-9. On form submission, the server authenticates to the Okta Workflows API using a private key JWT, obtains a bearer token, and invokes the `JIT-Admin-Request` workflow
+2. The root `/` auto-redirects to `/dashboard`, which triggers Okta OIDC login if no session exists
+3. Okta authenticates the user and redirects back to `/authorization-code/callback`
+4. The OIDC middleware validates the tokens and creates a session
+5. The authorization middleware decodes the ID token, reads the `JIT-groups` claim, and verifies the user is in the `JIT-Eligible-Users` group
+6. User sees the dashboard and can submit JIT access requests
+7. On form submission, the server authenticates to the Okta Workflows API using a private key JWT, obtains a bearer token, and invokes the `JIT-Admin-Request` workflow
 
 ---
 
@@ -72,12 +71,12 @@ Cloud Run: jit-admin-portal (Express.js on port 8080)
 |-----------|---------|---------|
 | `express` | 5.x | Web framework |
 | `@okta/oidc-middleware` | 5.4.1 | Okta OpenID Connect authentication |
-| `jose` | 5.9.6 | RS256 JWT signing for Workflows API auth |
-| `helmet` | 7.1.0 | Security headers and Content Security Policy |
+| `jose` | 5.x | RS256 JWT signing for Workflows API auth |
+| `helmet` | 8.x | Security headers and Content Security Policy |
 | `express-session` | 1.19.x | Session management with hardened cookies |
-| `express-rate-limit` | 7.4.1 | Per-user rate limiting (API and page) |
-| `ejs` | 3.1.10 | Server-side HTML templating |
-| `uuid` | 10.0.0 | Correlation IDs and JWT JTI claims |
+| `express-rate-limit` | 7.x | Per-user rate limiting (API and page) |
+| `ejs` | 3.1.x | Server-side HTML templating |
+| `uuid` | 11.x | Correlation IDs and JWT JTI claims |
 
 ### Infrastructure
 
@@ -104,28 +103,38 @@ Cloud Run: jit-admin-portal (Express.js on port 8080)
 ```
 jit-admin-portal/
 ├── src/
-│   ├── server.js                    # Main Express app (routes, middleware, OIDC init)
+│   ├── server.js                    # Main Express app (routes, middleware, OIDC init, cache-busting)
 │   ├── middleware/
 │   │   ├── authorization.js         # Group-based authorization (JIT-groups claim)
 │   │   ├── rateLimiter.js           # API (30/hr) and page (100/15min) rate limiters
-│   │   └── validation.js            # JIT request payload validation and sanitization
+│   │   └── validation.js            # JIT request payload validation (conditional justification)
 │   ├── services/
 │   │   └── workflowsService.js      # OAuth 2.0 private key JWT, circuit breaker, retry logic
 │   ├── utils/
 │   │   └── logger.js                # Structured JSON logging for Google Cloud Logging
 │   ├── views/
-│   │   ├── home.ejs                 # Landing page with sign-in button
-│   │   ├── dashboard.ejs            # JIT request form (protected)
+│   │   ├── home.ejs                 # Landing page (redirects to /dashboard)
+│   │   ├── dashboard.ejs            # JIT request form with duration unit selector
 │   │   ├── profile.ejs              # User profile and group memberships
 │   │   └── error.ejs                # Error display page
-│   └── public/                      # Static assets directory
+│   └── public/
+│       ├── css/
+│       │   ├── common.css           # Shared styles (navbar, cards, buttons, typography)
+│       │   ├── dashboard.css        # Dashboard form, alerts, spinner, request types table
+│       │   ├── home.css             # Landing page layout
+│       │   ├── profile.css          # Profile card and group list
+│       │   └── error.css            # Error page styling
+│       └── js/
+│           └── dashboard.js         # Client-side form handling (unit conversion, conditional fields)
 ├── Dockerfile                       # Node 20-slim, non-root user, health check
 ├── deploy.sh                        # Automated Cloud Run deployment script
 ├── package.json                     # Dependencies and scripts
 ├── package-lock.json                # Locked dependency versions
+├── ARCHITECTURE.md                  # Mermaid architecture diagrams
+├── Implementation-Summary.md        # Implementation notes and deployment history
+├── .env.example                     # Environment variable documentation
 ├── .gitignore
-├── .dockerignore
-└── Implementation-Summary.md        # Original architecture notes (v1)
+└── .dockerignore
 ```
 
 ---
@@ -351,12 +360,12 @@ gcloud run deploy jit-admin-portal \
 
 | Method | Path | Protection | Description |
 |--------|------|-----------|-------------|
-| GET | `/` | Page rate limiter | Landing page. Shows sign-in or dashboard button based on auth state. |
-| GET | `/dashboard` | Page limiter, OIDC auth, `JIT-Eligible-Users` group | JIT request form. Displays request types, duration ranges, and submission form. |
+| GET | `/` | Page rate limiter | Auto-redirects to `/dashboard` (triggers Okta login if needed). |
+| GET | `/dashboard` | Page limiter, OIDC auth, `JIT-Eligible-Users` group | JIT request form with duration unit selector (minutes/hours) and conditional justification. |
 | GET | `/profile` | Page limiter, OIDC auth | User profile page showing Okta claims and group memberships. |
 | POST | `/api/jit-request` | API limiter, OIDC auth, `JIT-Eligible-Users` group, validation | Submits a JIT access request. Invokes Okta Workflow. Returns JSON. |
 | GET | `/logout` | None | Destroys session and redirects to Okta logout. |
-| GET | `/health` | None (always available) | Health check. Returns service status, OIDC state, memory usage. |
+| GET | `/health` | None (always available) | Health check. Returns minimal JSON status (no info disclosure). |
 | GET | `/authorization-code/callback` | OIDC middleware | Okta OIDC callback. Handled automatically by `@okta/oidc-middleware`. |
 
 ### POST /api/jit-request
@@ -366,7 +375,7 @@ gcloud run deploy jit-admin-portal \
 {
   "requestType": "standard | emergency | extended",
   "durationMinutes": 30,
-  "businessJustification": "Reason for requesting admin access..."
+  "businessJustification": "Reason for requesting admin access..."  // optional for "extended"
 }
 
 **Success response (200):**
@@ -396,13 +405,13 @@ gcloud run deploy jit-admin-portal \
 
 ## JIT Request Types
 
-| Type | Duration Range | Approval | Incident Ticket |
-|------|---------------|----------|----------------|
-| Standard | 15 -- 240 minutes | Manager approval | Not required |
-| Emergency | 15 -- 480 minutes | Auto-approved | Required (alphanumeric + hyphens, 3-30 chars) |
-| Extended | 60 -- 480 minutes | Manager approval | Not required |
+| Type | Duration Range | Approval | Business Justification |
+|------|---------------|----------|----------------------|
+| Standard | 15 -- 240 minutes | User approval | Required (10-1000 chars) |
+| Extended | 15 -- 480 minutes | User approval | Not required |
+| Emergency | 15 -- 480 minutes | Manager approval | Required (10-1000 chars) |
 
-All requests require a business justification (10--1000 characters).
+The dashboard supports duration entry in both minutes and hours (client-side conversion to minutes before submission).
 
 ---
 

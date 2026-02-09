@@ -130,14 +130,14 @@ sequenceDiagram
     participant OktaWF as Okta Workflows API
 
     User->>Browser: Fill form & submit
-    Browser->>Express: POST /api/jit-request<br/>{requestType, durationMinutes,<br/>businessJustification}
+    Browser->>Express: POST /api/jit-request<br/>{requestType, durationMinutes,<br/>businessJustification (optional for extended)}
 
     Express->>Express: Rate limit check (30/hr)
     Express->>Express: ensureAuthenticated()
     Express->>Express: requireGroup()
 
     Express->>Validation: Validate payload
-    Note over Validation: Check requestType valid<br/>Check duration in range<br/>Check justification 10-1000 chars
+    Note over Validation: Check requestType valid<br/>Check duration in range<br/>Check justification 10-1000 chars<br/>(justification not required for extended)
 
     alt Validation fails
         Validation-->>Browser: 400 {errors: [...]}
@@ -318,7 +318,7 @@ jit-admin-portal/
 |   |                                   #   - Request/response logging middleware
 |   |
 |   +-- views/
-|   |   +-- dashboard.ejs               # JIT request form (request type, duration, justification)
+|   |   +-- dashboard.ejs               # JIT request form (duration unit selector, conditional justification)
 |   |   +-- home.ejs                    # Landing page (redirects to /dashboard)
 |   |   +-- profile.ejs                 # User profile and group memberships
 |   |   +-- error.ejs                   # Error display (404, 403, 500)
