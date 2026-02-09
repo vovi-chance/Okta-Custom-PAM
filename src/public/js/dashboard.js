@@ -51,13 +51,13 @@
 
     // Show/hide business justification (hidden for extended)
     if (this.value === 'extended') {
-      justificationGroup.style.display = 'none';
+      justificationGroup.classList.add('is-hidden');
       justificationInput.required = false;
     } else if (this.value) {
-      justificationGroup.style.display = 'block';
+      justificationGroup.classList.remove('is-hidden');
       justificationInput.required = true;
     } else {
-      justificationGroup.style.display = 'none';
+      justificationGroup.classList.add('is-hidden');
       justificationInput.required = false;
     }
 
@@ -81,8 +81,8 @@
     var el = type === 'success' ? alertSuccess : alertError;
     var other = type === 'success' ? alertError : alertSuccess;
     el.textContent = message;
-    el.style.display = 'block';
-    other.style.display = 'none';
+    el.classList.add('show');
+    other.classList.remove('show');
     el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
@@ -90,8 +90,8 @@
     e.preventDefault();
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<span class="spinner"></span> Submitting...';
-    alertSuccess.style.display = 'none';
-    alertError.style.display = 'none';
+    alertSuccess.classList.remove('show');
+    alertError.classList.remove('show');
 
     // Convert to minutes if user selected hours
     var rawValue = parseFloat(durationInput.value);
@@ -127,7 +127,7 @@
             el.classList.remove('show');
           });
           durationHint.textContent = '';
-          justificationGroup.style.display = 'none';
+          justificationGroup.classList.add('is-hidden');
           justificationInput.required = false;
         } else {
           var msg = result.data.errors
