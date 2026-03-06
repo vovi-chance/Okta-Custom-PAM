@@ -129,7 +129,7 @@ app.use(requestLogger);
 
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || 'dev-secret-change-me',
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     name: 'jit.sid',
@@ -269,6 +269,7 @@ app.post(
 
     const payload = {
       requestorId: userInfo.sub,
+      requestorLogin: userInfo.preferred_username || userInfo.email,
       requestorEmail: userInfo.email,
       requestorName: userInfo.name || userInfo.preferred_username || 'Unknown',
       durationMinutes,
@@ -348,13 +349,17 @@ app.get('/logout', async (req, res) => {
     }
   }
 
-  if (req.session) {
-    req.session.destroy((err) => {
-      if (err) {
-        logger.error('Session destruction failed', err);
-      }
-    });
-  }
+  // Destroy session before redirecting
+  await new Promise((resolve) => {
+    if (req.session) {
+      req.session.destroy((err) => {
+        if (err) logger.error('Session destruction failed', err);
+        resolve();
+      });
+    } else {
+      resolve();
+    }
+  });
 
   if (oktaOrgUrl && appBaseUrl) {
     res.redirect(

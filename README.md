@@ -1,548 +1,761 @@
-# JIT Admin Request Portal
+# Okta Custom PAM
 
-**Version 2.0.0** | Node.js 20 | Google Cloud Run | Okta OIDC
+A self-service web portal for requesting temporary Just-In-Time (JIT) privileged admin access, powered by Okta authentication and Okta Workflows. Designed for deployment on Google Cloud Run.
 
-A production-hardened web portal for NFI Industries that enables authorized users to request temporary (Just-In-Time) privileged admin access. Requests are authenticated through Okta OIDC, authorized via Okta group membership, and fulfilled by invoking an Okta Workflow. Hosted on Google Cloud Run.
+## Features
 
----
+- **Okta OIDC authentication** — Authorization Code flow with automatic session management
+- **Group-based authorization** — Access restricted to members of a configurable Okta group
+- **Three request types** — Standard, Extended, and Emergency with configurable duration ranges
+- **Okta Workflows integration** — Submits JIT requests via OAuth 2.0 private key JWT (RS256)
+- **Defense-in-depth security** — Helmet CSP, rate limiting, input validation, secure cookies
+- **Circuit breaker & retry** — Resilient workflow invocation with exponential backoff
+- **Structured logging** — JSON logs compatible with Google Cloud Logging
+- **Cloud-native** — Containerized, stateless, secrets via GCP Secret Manager
 
-## Table of Contents
+## Prerequisites
 
-- [Architecture](#architecture)
-- [Authentication Flow](#authentication-flow)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Security Features](#security-features)
-- [Configuration](#configuration)
-- [GCP Infrastructure](#gcp-infrastructure)
-- [Okta Configuration](#okta-configuration)
-- [Deployment](#deployment)
-- [Routes and API](#routes-and-api)
-- [JIT Request Types](#jit-request-types)
-- [Accessing Google Cloud for Continued Work](#accessing-google-cloud-for-continued-work)
-- [Monitoring and Troubleshooting](#monitoring-and-troubleshooting)
-- [Known Issues and Notes](#known-issues-and-notes)
-
----
-
-## Architecture
-
-```
-User (Browser)
-  |
-  v
-Cloud Run: jit-admin-portal (Express.js on port 8080)
-  |
-  +--> Okta OIDC (@okta/oidc-middleware)  (Layer 1 - Okta identity)
-  |      |
-  |      +--> ID Token "JIT-groups" claim --> Group-based authorization
-  |
-  +--> Okta Workflows API  (Layer 2 - OAuth 2.0 Private Key JWT)
-         |
-         +--> JIT-Admin-Request workflow (processes access request)
-```
-
-### Authentication Layers
-
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| 1 | Okta OIDC (Authorization Code flow) | Verifies Okta identity via `nfi.oktapreview.com/oauth2/default`. ID token carries the `JIT-groups` custom claim for authorization. |
-| 2 | OAuth 2.0 Private Key JWT (RS256) | Machine-to-machine auth for the backend to invoke the Okta Workflows API with `client_credentials` grant. |
-
----
-
-## Authentication Flow
-
-1. User navigates to `https://jit-admin-portal-65719149240.us-central1.run.app`
-2. The root `/` auto-redirects to `/dashboard`, which triggers Okta OIDC login if no session exists
-3. Okta authenticates the user and redirects back to `/authorization-code/callback`
-4. The OIDC middleware validates the tokens and creates a session
-5. The authorization middleware decodes the ID token, reads the `JIT-groups` claim, and verifies the user is in the `JIT-Eligible-Users` group
-6. User sees the dashboard and can submit JIT access requests
-7. On form submission, the server authenticates to the Okta Workflows API using a private key JWT, obtains a bearer token, and invokes the `JIT-Admin-Request` workflow
-
----
-
-## Tech Stack
-
-### Application
-
-| Dependency | Version | Purpose |
-|-----------|---------|---------|
-| `express` | 5.x | Web framework |
-| `@okta/oidc-middleware` | 5.4.1 | Okta OpenID Connect authentication |
-| `jose` | 5.x | RS256 JWT signing for Workflows API auth |
-| `helmet` | 8.x | Security headers and Content Security Policy |
-| `express-session` | 1.19.x | Session management with hardened cookies |
-| `express-rate-limit` | 7.x | Per-user rate limiting (API and page) |
-| `ejs` | 3.1.x | Server-side HTML templating |
-| `uuid` | 11.x | Correlation IDs and JWT JTI claims |
-
-### Infrastructure
-
-| Service | Purpose |
-|---------|---------|
-| Google Cloud Run | Container hosting (managed, serverless) |
-| Google Cloud Build | Container image builds |
-| Google Artifact Registry | Docker image storage |
-| Google Secret Manager | Stores 7 secrets (session key, Okta credentials, workflow keys) |
-
-### Okta
-
-| Component | Purpose |
-|-----------|---------|
-| OIDC Web App ("JIT Admin Request Portal") | User authentication via Authorization Code flow |
-| API Services App ("JIT Portal - Workflow Invoker") | Machine-to-machine auth with private key JWT |
-| Authorization Server (`/oauth2/default`) | Issues tokens with custom `JIT-groups` claim |
-| Okta Workflows (`JIT-Admin-Request`) | Processes JIT access requests |
-
----
+- **Node.js** 20+
+- **Okta tenant** with:
+  - An OIDC Web Application (Authorization Code flow)
+  - A custom `JIT-groups` claim on the authorization server returning group memberships
+  - An Okta group (default: `JIT-Eligible-Users`) for portal access
+  - Okta Workflows with a flow to process JIT requests
+  - An OAuth 2.0 service app (private key JWT) for invoking workflows
+- **Google Cloud Platform** project with:
+  - Cloud Run, Cloud Build, Artifact Registry, and Secret Manager APIs enabled
 
 ## Project Structure
 
 ```
-jit-admin-portal/
-├── src/
-│   ├── server.js                    # Main Express app (routes, middleware, OIDC init, cache-busting)
-│   ├── middleware/
-│   │   ├── authorization.js         # Group-based authorization (JIT-groups claim)
-│   │   ├── rateLimiter.js           # API (30/hr) and page (100/15min) rate limiters
-│   │   └── validation.js            # JIT request payload validation (conditional justification)
-│   ├── services/
-│   │   └── workflowsService.js      # OAuth 2.0 private key JWT, circuit breaker, retry logic
-│   ├── utils/
-│   │   └── logger.js                # Structured JSON logging for Google Cloud Logging
-│   ├── views/
-│   │   ├── home.ejs                 # Landing page (redirects to /dashboard)
-│   │   ├── dashboard.ejs            # JIT request form with duration unit selector
-│   │   ├── profile.ejs              # User profile and group memberships
-│   │   └── error.ejs                # Error display page
-│   └── public/
-│       ├── css/
-│       │   ├── common.css           # Shared styles (navbar, cards, buttons, typography)
-│       │   ├── dashboard.css        # Dashboard form, alerts, spinner, request types table
-│       │   ├── home.css             # Landing page layout
-│       │   ├── profile.css          # Profile card and group list
-│       │   └── error.css            # Error page styling
-│       └── js/
-│           └── dashboard.js         # Client-side form handling (unit conversion, conditional fields)
-├── Dockerfile                       # Node 20-slim, non-root user, health check
-├── deploy.sh                        # Automated Cloud Run deployment script
-├── package.json                     # Dependencies and scripts
-├── package-lock.json                # Locked dependency versions
-├── ARCHITECTURE.md                  # Mermaid architecture diagrams
-├── Implementation-Summary.md        # Implementation notes and deployment history
-├── .env.example                     # Environment variable documentation
-├── .gitignore
-└── .dockerignore
+src/
+  server.js                  # Express app, routes, middleware pipeline
+  middleware/
+    authorization.js         # Group-based access control
+    rateLimiter.js           # Per-user rate limiting
+    validation.js            # JIT request schema validation
+  services/
+    workflowsService.js      # Okta Workflows API client (RS256 JWT auth)
+  utils/
+    logger.js                # Structured JSON logger for Cloud Logging
+  views/                     # EJS templates (dashboard, profile, error)
+  public/                    # Static assets (CSS, client JS)
+Dockerfile                   # Node 20-slim, non-root user
+deploy.sh                    # Cloud Run deployment automation
 ```
 
----
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SESSION_SECRET` | Yes | Secret key for session encryption |
+| `OKTA_ORG_URL` | Yes | Your Okta org URL (e.g. `https://your-org.okta.com`) |
+| `APP_BASE_URL` | Yes | Public URL of this portal (e.g. `https://your-app.run.app`) |
+| `OKTA_CLIENT_ID` | Yes | OIDC web application client ID |
+| `OKTA_CLIENT_SECRET` | Yes | OIDC web application client secret |
+| `OKTA_WORKFLOWS_CLIENT_ID` | No | OAuth service app client ID for Workflows API |
+| `OKTA_WORKFLOWS_KEY_ID` | No | Key ID for the RS256 private key |
+| `OKTA_WORKFLOWS_PRIVATE_KEY` | No | RS256 private key (PEM or JWK format) |
+| `OKTA_WORKFLOWS_INVOKE_URL` | No | Okta Workflows invoke endpoint URL |
+| `PORT` | No | Server port (default: `8080`) |
+| `NODE_ENV` | No | Environment (`production` / `development`) |
+
+## Local Development
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/your-org/Okta-Custom-PAM.git
+   cd Okta-Custom-PAM
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Create a `.env` file from the example:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your Okta and app configuration
+   ```
+
+4. Start the development server:
+   ```bash
+   npm run dev
+   ```
+
+5. Open `http://localhost:8080` in your browser.
+
+## Okta Setup
+
+### 1. OIDC Web Application
+
+1. In Okta Admin Console, go to **Applications > Create App Integration**
+2. Select **OIDC - OpenID Connect** and **Web Application**
+3. Set the sign-in redirect URI to `{APP_BASE_URL}/authorization-code/callback`
+4. Set the sign-out redirect URI to `{APP_BASE_URL}`
+5. Assign the application to users/groups who should access the portal
+
+### 2. Custom Groups Claim
+
+1. Go to **Security > API > Authorization Servers > default**
+2. Under **Claims**, add a new claim:
+   - Name: `JIT-groups`
+   - Include in: `ID Token` (Always)
+   - Value type: `Groups`
+   - Filter: Matches regex `.*` (or a specific pattern for your groups)
+
+### 3. Authorization Group
+
+Create an Okta group (default name: `JIT-Eligible-Users`) and assign users who should be able to submit JIT requests.
+
+### 4. Workflows OAuth Service App
+
+1. Create a new **API Services** application in Okta
+2. Configure **Client Credentials** with **Public key / Private key** authentication
+3. Grant the `okta.workflows.invoke.manage` scope
+4. Generate an RS256 key pair and note the Key ID
+
+## GCP Deployment
+
+### 1. Enable APIs
+
+```bash
+gcloud services enable   run.googleapis.com   cloudbuild.googleapis.com   secretmanager.googleapis.com   artifactregistry.googleapis.com
+```
+
+### 2. Create Artifact Registry Repository
+
+```bash
+gcloud artifacts repositories create jit-portal-repo   --repository-format=docker   --location=us-central1
+```
+
+### 3. Create Secrets
+
+```bash
+# Create each secret in Secret Manager
+echo -n "your-session-secret" | gcloud secrets create okta-custom-pam-session-secret --data-file=-
+echo -n "your-client-id" | gcloud secrets create okta-custom-pam-okta-client-id --data-file=-
+echo -n "your-client-secret" | gcloud secrets create okta-custom-pam-okta-client-secret --data-file=-
+# ... repeat for remaining secrets (see deploy.sh --help for secret names)
+```
+
+### 4. Deploy
+
+```bash
+export GCP_PROJECT_ID=your-project-id
+export OKTA_ORG_URL=https://your-org.okta.com
+export APP_BASE_URL=https://your-app-url.run.app
+
+./deploy.sh
+```
+
+See `./deploy.sh --help` for all available options and environment variables.
 
 ## Security Features
 
-### Defense-in-Depth Layers
-
-1. **Network** -- Cloud Run set to `--no-allow-unauthenticated`
-2. **Transport** -- HTTPS everywhere; secure cookies enforced in production
-3. **Headers** -- Helmet sets CSP, X-Frame-Options, X-Content-Type-Options, and more
-4. **Authentication (Okta)** -- OIDC Authorization Code flow with session validation
-5. **Authorization** -- ID token `JIT-groups` claim checked against required group (`JIT-Eligible-Users`)
-7. **Rate Limiting** -- API: 30 requests/hour per user; Pages: 100 requests/15 minutes per user
-8. **Input Validation** -- Schema-based validation with sanitization on all JIT request payloads
-9. **Session Hardening** -- `httpOnly`, `sameSite: lax`, `secure: true`, 1-hour `maxAge`, custom cookie name `jit.sid`
-10. **API Security** -- OAuth 2.0 Private Key JWT (RS256) for machine-to-machine Workflows API auth; tokens cached with 60s refresh buffer; JTI prevents replay
-11. **Resilience** -- Circuit breaker (5-failure threshold, 60s reset), retry with exponential backoff (2 retries), 30s request timeouts
-12. **Observability** -- Structured JSON logging with request correlation IDs, compatible with Google Cloud Logging
-
-### Content Security Policy
-
-```
-default-src 'self'
-script-src  'self'
-style-src   'self' fonts.googleapis.com
-font-src    'self' fonts.gstatic.com
-img-src     'self' data:
-connect-src 'self'
-frame-src   'none'
-object-src  'none'
-form-action 'self'
-```
-
-### Container Security
-
-- Base image: `node:20-slim` (minimal attack surface)
-- Runs as non-root `nodejs` user
-- Production dependencies only (`npm install --omit=dev`)
-- npm cache cleaned after install
+- **Authentication**: Okta OIDC (Authorization Code flow)
+- **Authorization**: Group membership verification via ID token claims
+- **Transport**: HTTPS-only cookies (`secure`, `httpOnly`, `sameSite: lax`)
+- **Headers**: Helmet.js with strict Content Security Policy
+- **Rate limiting**: Per-user limits for API (30/hr) and page loads (100/15min)
+- **Input validation**: Schema-based validation on all JIT request payloads
+- **API security**: OAuth 2.0 private key JWT (RS256) for machine-to-machine auth
+- **Container**: Non-root user, production-only dependencies, minimal base image
+- **Cloud Run**: `--no-allow-unauthenticated` requires identity verification
+- **Secrets**: All credentials stored in GCP Secret Manager
 
 ---
 
-## Configuration
+## Okta Workflow Setup Guide
 
-### Environment Variables
+The following guide provides step-by-step instructions for building the Okta Workflow that receives and processes JIT access requests from this portal.
 
-| Variable | Source | Description |
-|----------|--------|-------------|
-| `NODE_ENV` | Set in deploy | `production` in Cloud Run |
-| `PORT` | Cloud Run default | `8080` |
-| `OKTA_ORG_URL` | Set in deploy | `https://nfi.oktapreview.com` |
-| `APP_BASE_URL` | Set in deploy | `https://jit-admin-portal-65719149240.us-central1.run.app` |
-| `SESSION_SECRET` | Secret Manager | Express session encryption key |
-| `OKTA_CLIENT_ID` | Secret Manager | OIDC web app client ID |
-| `OKTA_CLIENT_SECRET` | Secret Manager | OIDC web app client secret |
-| `OKTA_WORKFLOWS_CLIENT_ID` | Secret Manager | Workflows API service app client ID |
-| `OKTA_WORKFLOWS_KEY_ID` | Secret Manager | Workflows API public key ID |
-| `OKTA_WORKFLOWS_PRIVATE_KEY` | Secret Manager | Workflows API private key (PEM, RS256) |
-| `OKTA_WORKFLOWS_INVOKE_URL` | Secret Manager | Workflows API endpoint URL |
+# JIT Admin Activate — Step-by-Step Recreation Guide
 
-### GCP Secret Manager Secrets
+## What This Workflow Does
 
-| Secret Name | Maps To |
-|-------------|---------|
-| `jit-portal-session-secret` | `SESSION_SECRET` |
-| `jit-portal-okta-client-id` | `OKTA_CLIENT_ID` |
-| `jit-portal-okta-client-secret` | `OKTA_CLIENT_SECRET` |
-| `jit-portal-wf-client-id` | `OKTA_WORKFLOWS_CLIENT_ID` |
-| `jit-portal-wf-key-id` | `OKTA_WORKFLOWS_KEY_ID` |
-| `jit-portal-wf-private-key` | `OKTA_WORKFLOWS_PRIVATE_KEY` |
-| `jit-portal-wf-invoke-url` | `OKTA_WORKFLOWS_INVOKE_URL` |
+This automation enables **Just-In-Time (JIT) Temporary Admin Access**. When a user needs elevated admin privileges for a limited time, they submit a request via API. The workflow validates their identity, verifies they have a linked admin account, sends an MFA push notification to either themselves or their manager (depending on request type), and — if approved — temporarily activates the admin account. When the timer expires, the admin account is automatically suspended and removed from the privileged group. A safety net scheduled flow catches any cases where the timer fails.
+
+### Approval Routing
+
+| Request Type | Approval Method | Justification Required | Duration Range |
+|---|---|---|---|
+| **Standard** | MFA push to the **requestor** (self-approval) | Yes | 15–240 minutes |
+| **Extended** | MFA push to the **requestor** (self-approval) | No | 15–480 minutes |
+| **Emergency** | MFA push to the requestor's **manager** | Yes | 15–480 minutes |
 
 ---
 
-## GCP Infrastructure
+## Prerequisites Before Building
 
-| Property | Value |
-|----------|-------|
-| Project ID | `jit-admin-portal` |
-| Project Number | `65719149240` |
-| Region | `us-central1` |
-| Service URL | `https://jit-admin-portal-65719149240.us-central1.run.app` |
-| Artifact Registry Repo | `jit-admin-repo` |
+Before creating any flows, set up the following in your environment:
 
-### GCP Resources
-
-- **Cloud Run Service** -- `jit-admin-portal` (managed, us-central1)
-- **Artifact Registry** -- `jit-admin-repo` (Docker format, us-central1)
-- **Secret Manager** -- 7 secrets storing all credentials
-- **Cloud Build** -- Builds Docker images from source
-
-### IAM
-
-- Compute service account: storage, artifact registry, logging, secret manager roles
-- Cloud Build service account: Cloud Run deployer
-- Organization policy: `iam.allowedPolicyMemberDomains` restricts to customer ID `C012imv50`
-
-### APIs Enabled
-
-`run.googleapis.com`, `cloudbuild.googleapis.com`, `secretmanager.googleapis.com`, `artifactregistry.googleapis.com`
+1. **Okta Connection** — Create a named Okta API connection in Workflows (e.g. "Okta – [Your Org Name]"). This is used in every Okta action throughout all flows.
+2. **Linked Objects in Okta** — Configure a Primary Linked Object relationship so that a standard user account can be linked to an admin account. Every requestor must have their admin account linked before this workflow can function.
+3. **JIT Admin Group** — Create a group in Okta that represents elevated/admin access. Note the Group ID — you will reference it in the expiration and activation steps.
+4. **Custom Profile Attribute** — Add a custom attribute on Okta user profiles called something like `JIT Expiration` (text/datetime field). This is used to record when the admin's elevated access will end.
+5. **Okta Workflows Table** — Create a table to serve as the JIT audit log (see Table Schema section at the bottom of this guide).
+6. **MFA Push Factor** — Ensure that approvers (managers or requestors, depending on your configuration) have an Okta push factor (e.g. Okta Verify) enrolled. The workflow specifically looks for a `push` factor type.
 
 ---
 
-## Okta Configuration
+## Flow Inventory
 
-**Org URL:** `https://nfi.oktapreview.com`
+Build these 6 flows in the order listed. Each depends on the ones below it being created first.
 
-### Application 1: OIDC Web App
-
-| Setting | Value |
-|---------|-------|
-| Name | JIT Admin Request Portal |
-| Sign-in method | OIDC |
-| Application type | Web Application |
-| Grant type | Authorization Code |
-| Sign-in redirect URI | `https://jit-admin-portal-65719149240.us-central1.run.app/authorization-code/callback` |
-| Sign-out redirect URI | `https://jit-admin-portal-65719149240.us-central1.run.app` |
-| Scopes | `openid`, `profile`, `email` |
-| Authorization Server | `default` (`/oauth2/default`) |
-
-### Application 2: API Services App
-
-| Setting | Value |
-|---------|-------|
-| Name | JIT Portal - Workflow Invoker |
-| Sign-in method | OIDC |
-| Application type | API Services |
-| Authentication | Public key / Private key (RS256) |
-| Scope | `okta.workflows.invoke.manage` |
-| Grant type | Client Credentials |
-
-### Authorization Server Custom Claim
-
-On the `default` authorization server (`Security > API > default > Claims`):
-
-| Setting | Value |
-|---------|-------|
-| Claim name | `JIT-groups` |
-| Include in | ID Token (Always) |
-| Value type | Groups |
-| Filter | Matches regex `.*` (or specific group filter) |
-
-### Required Okta Groups
-
-| Group | Purpose |
-|-------|---------|
-| `JIT-Eligible-Users` | Users authorized to request JIT access (required for dashboard) |
-| `JIT-Approvers` | Users who can approve JIT requests |
-| `JIT-Admins-Active` | Users with currently active JIT admin access |
-| `Admin-Accounts-All` | All admin-level accounts |
-
-### Authorization Server Access Policy
-
-The `default` authorization server must have an Access Policy that allows the JIT Admin Request Portal app to obtain tokens. Configure under `Security > API > default > Access Policies`.
+| Build Order | Flow Name | Type | Purpose |
+|---|---|---|---|
+| 1 | **1.4 Helper – JIT Admin Expire** | Helper | Suspends admin, removes from group, updates table |
+| 2 | **1.3b Helper – JIT Safety Net Check** | Helper | Checks if a pending record is overdue and calls Expire |
+| 3 | **1.3a Schedule – JIT Safety Net Poller** | Schedule | Sweeps the table on a schedule and calls 1.3b |
+| 4 | **1.2 Helper – Wait & Suspend** | Helper | Waits the requested duration then calls Expire |
+| 5 | **1.1 Helper – JIT-Admin-Approve** | Helper | Handles MFA challenge and approval logic |
+| 6 | **1.0 Main – JIT Admin Activate** | API Endpoint | Entry point — orchestrates all validation and activation |
 
 ---
 
-## Deployment
+---
 
-### Prerequisites
+# Flow 1 — 1.4 Helper – JIT Admin Expire
 
-- Google Cloud SDK (`gcloud`) authenticated with project access
-- Artifact Registry repository created:
-  ```bash
-  gcloud artifacts repositories create jit-admin-repo \
-    --repository-format=docker \
-    --location=us-central1 \
-    --description="JIT Admin Portal container images"
-  ```
-- All 7 secrets created in GCP Secret Manager
-- Okta applications configured with correct redirect URIs
+**Type:** Helper Flow
+**Called by:** 1.2 Helper – Wait & Suspend, 1.3b Helper – JIT Safety Net Check
 
-### Quick Deploy (using deploy.sh)
+**Purpose:** This is the expiration engine. It reads the admin account's current status, and if the account is still active, suspends it, removes it from the privileged group, records the action in the audit table, and updates the admin's Okta profile.
 
-```bash
-# Default deployment
-./deploy.sh
+### Inputs
 
-# With custom domain
-./deploy.sh --domain jit.nfiindustries.com
+| Input Name | Description |
+|---|---|
+| `AdminID` | The Okta ID of the admin account to be expired |
+| `tableRowId` | The Row ID of the audit table record for this session |
+| `requestorId` | The Okta ID of the person who originally requested access |
+| `source` | Which flow triggered the expiration (e.g. "waitfor", "schedule") |
+| `requestorName` | Display name of the requestor, used in notifications |
 
-# Build container only (no deploy)
-./deploy.sh --build-only
+### Steps
 
-# Override project or region
-./deploy.sh --project my-project --region us-east1
-```
+**Step 1 — Read the Admin Account**
+- Add an Okta **Read User** action.
+- Set the ID or Login input to the `AdminID` input from this helper flow.
+- Collect the outputs: `ID`, `Status`, `Primary email`, `Secondary email`, and your custom JIT Expiration attribute.
 
-### Manual Build and Deploy
+**Step 2 — Check if Admin is Still ACTIVE**
+- Add a **Branching → If/Else** card.
+- Condition: `Status` (from Step 1) **equal to** `"ACTIVE"`
+- This protects against double-processing — if the account was already suspended by another path, skip the expiration actions.
 
-```bash
-# Build and push container image
-gcloud builds submit \
-  --tag us-central1-docker.pkg.dev/jit-admin-portal/jit-admin-repo/jit-admin-portal:latest
+**TRUE branch — Admin is still active, proceed to expire:**
 
-# Deploy to Cloud Run
-gcloud run deploy jit-admin-portal \
-  --image us-central1-docker.pkg.dev/jit-admin-portal/jit-admin-repo/jit-admin-portal:latest \
-  --region us-central1
-```
+> **Step 2a — Suspend the Admin User**
+> - Add an Okta **Suspend User** action.
+> - Set the ID or Login to the `ID` output from Step 1.
 
-> **Note:** The `deploy.sh` script references repo name `jit-portal-repo`. If you created the repository as `jit-admin-repo`, either update the script or use the manual commands above with `jit-admin-repo`.
+> **Step 2b — Remove Admin from the Privileged Group**
+> - Add an Okta **Remove User from Group** action.
+> - Set the Group ID to your JIT Admin group's ID.
+> - Set the User ID to the `ID` output from Step 1.
 
-### Cloud Run Settings
+> **Step 2c — Get the Current Timestamp**
+> - Add a **Date & Time → Now** action.
+> - You will use the date output to record when the suspension occurred.
 
-| Setting | Value |
-|---------|-------|
-| Platform | Managed |
-| Region | us-central1 |
-| Port | 8080 |
-| Memory | 512Mi |
-| CPU | 1 vCPU |
-| Min instances | 1 (no cold starts) |
-| Max instances | 10 |
-| Concurrency | 80 requests/instance |
-| Request timeout | 60 seconds |
-| Authentication | Required (`--no-allow-unauthenticated`) |
+> **Step 2d — Format the Date**
+> - Add a **Date & Time → Date to Text** action.
+> - Set the start date to the output from Step 2c.
+> - Set your preferred date/time format (e.g. `MM/DD/YYYY hh:mm`).
+> - Set the timezone to your organization's local timezone.
+> - Output: `Formatted Date`
+
+> **Step 2e — Update the Audit Table Row**
+> - Add a **Tables → Update Row** action.
+> - Set Update By to **Row ID**, and map `tableRowId` from the helper inputs.
+> - Set the following fields:
+>   - `source` → the `source` input from this helper (e.g. "waitfor")
+>   - `notes` → a descriptive message such as "Account suspended successfully"
+>   - `status` → the text value `"processed"`
+>   - `processedSuspensionTimestamp` → the `Formatted Date` from Step 2d
+
+> **Step 2f — Update the Admin User's Okta Profile**
+> - Add an Okta **Update User** action.
+> - Set the User ID to the `ID` from Step 1.
+> - Under Profile, set your JIT Expiration custom attribute to the `Formatted Date` from Step 2d.
+> - This records in the user's Okta profile when their elevated access ended.
+
+> **Step 2g — Return Success**
+> - Add a **Flow Control → Return** action.
+> - Return an output named `Expire Result` with the value `"Success"`.
+
+**FALSE branch — Admin is not active (already suspended):**
+
+> - Add an **Error Handling → Return Error** action.
+> - Set the message to something descriptive like `"No expiration set — account was not active"`.
 
 ---
 
-## Routes and API
+# Flow 2 — 1.3b Helper – JIT Safety Net Check
 
-| Method | Path | Protection | Description |
-|--------|------|-----------|-------------|
-| GET | `/` | Page rate limiter | Auto-redirects to `/dashboard` (triggers Okta login if needed). |
-| GET | `/dashboard` | Page limiter, OIDC auth, `JIT-Eligible-Users` group | JIT request form with duration unit selector (minutes/hours) and conditional justification. |
-| GET | `/profile` | Page limiter, OIDC auth | User profile page showing Okta claims and group memberships. |
-| POST | `/api/jit-request` | API limiter, OIDC auth, `JIT-Eligible-Users` group, validation | Submits a JIT access request. Invokes Okta Workflow. Returns JSON. |
-| GET | `/logout` | None | Destroys session and redirects to Okta logout. |
-| GET | `/health` | None (always available) | Health check. Returns minimal JSON status (no info disclosure). |
-| GET | `/authorization-code/callback` | OIDC middleware | Okta OIDC callback. Handled automatically by `@okta/oidc-middleware`. |
+**Type:** Helper Flow
+**Called by:** 1.3a Schedule – JIT Safety Net Poller
 
-### POST /api/jit-request
+**Purpose:** For each pending audit table row, this flow calculates whether the session has expired. If it has and the admin account is still active, it calls Flow 1 (1.4 Expire) to clean it up. If the account was already suspended, it marks the row as processed.
 
-**Request body:**
-```json
-{
-  "requestType": "standard | emergency | extended",
-  "durationMinutes": 30,
-  "businessJustification": "Reason for requesting admin access..."  // optional for "extended"
-}
+### Inputs
 
-**Success response (200):**
-```json
-{
-  "success": true,
-  "message": "JIT admin access request submitted successfully",
-  "requestId": "uuid",
-  "details": {
-    "requestType": "standard",
-    "durationMinutes": 30,
-    "requestor": "user@example.com"
-  }
-}
-```
+| Input Name | Description |
+|---|---|
+| `AdminID` | Okta ID of the admin account |
+| `expirationDateTime` | The recorded expiration datetime from the table row |
+| `tableRowId` | Row ID of the audit table record |
+| `currentDateTime` | The current time passed in from the scheduler |
+| `requestorId` | Okta ID of the original requestor |
+| `requestorName` | Display name of the original requestor |
 
-**Error response (4xx/5xx):**
-```json
-{
-  "success": false,
-  "error": "Error description",
-  "correlationId": "uuid"
-}
-```
+### Steps
 
----
+**Step 1 — Calculate Time Remaining**
+- Add a **Date & Time → Difference** action.
+- Set **End date** to `expirationDateTime`.
+- Set **Start date** to `currentDateTime`.
+- Collect the `minutes` output — this tells you how many minutes remain before expiration. A zero or negative value means the session has expired.
 
-## JIT Request Types
+**Step 2 — Check if Expired**
+- Add a **Branching → If/Else** card.
+- Condition: `minutes` **less than or equal to** `"0"`
+- **TRUE path** (expired) → proceed to Step 3.
+- **FALSE path** (not yet expired) → add a **Return Error** with message `"Not yet expired"` to skip this row gracefully.
 
-| Type | Duration Range | Approval | Business Justification |
-|------|---------------|----------|----------------------|
-| Standard | 15 -- 240 minutes | User approval | Required (10-1000 chars) |
-| Extended | 15 -- 480 minutes | User approval | Not required |
-| Emergency | 15 -- 480 minutes | Manager approval | Required (10-1000 chars) |
+**Step 3 — Read Admin Account Status**
+- Add an Okta **Read User** action.
+- Set ID or Login to `AdminID`.
+- Collect: `ID`, `Status`.
 
-The dashboard supports duration entry in both minutes and hours (client-side conversion to minutes before submission).
+**Step 4 — Check if Admin is Still ACTIVE**
+- Add a **Branching → If/Else** card.
+- Condition: `Status` **equal to** `"ACTIVE"`
+- **TRUE path** (still active, needs expiring):
+  - Add a **Flow Control → Call Flow** action.
+  - Select **1.4 Helper – JIT Admin Expire**.
+  - Pass: `AdminID`, `tableRowId`, `requestorId`, `source = "schedule"`, `requestorName`.
+- **FALSE path** (already suspended, just clean up the table row):
+  - Add a **Text → Compose** action with a note such as `"Admin account already suspended — marking as processed"`.
+  - Add a **Tables → Update Row** action.
+  - Update By: Row ID → `tableRowId`.
+  - Set `status` to `"processed"`.
 
 ---
 
-## Accessing Google Cloud for Continued Work
+# Flow 3 — 1.3a Schedule – JIT Safety Net Poller
 
-### Google Cloud Console
+**Type:** Scheduled Flow
+**Status:** Keep OFF until you are ready for production. Enable and configure the schedule (recommended: every 5–15 minutes) once the rest of the framework is tested.
 
-Open the project directly:
-```
-https://console.cloud.google.com/home/dashboard?project=jit-admin-portal
-```
+**Purpose:** Runs on a recurring schedule and acts as a safety net. It finds all audit table rows still in `"pending"` status and triggers Flow 2 (1.3b) to check each one.
 
-### Google Cloud Shell
+### Steps
 
-1. Go to https://console.cloud.google.com
-2. Click the **Cloud Shell** icon (terminal icon in the top-right toolbar)
-3. Cloud Shell opens with `gcloud` pre-authenticated
+**Step 1 — Search for Pending Records**
+- Add a **Tables → Search Rows** action targeting your JIT audit table.
+- Set the **Where Expression / Filter** to: `"status" = "pending"`.
+- Set Sort Direction to **Descending**.
+- Collect all column outputs including `AdminID`, `requestorId`, `requestorName`, `expirationDateTime`, and `Row ID`.
 
-The application source files should be in:
-```
-~/jit-portal/
-```
-
-If the files are not present, upload them from your local machine or re-create them.
-
-### Key gcloud Commands
-
-**View application logs:**
-```bash
-gcloud run services logs read jit-admin-portal --region us-central1 --limit 50
-```
-
-**Stream logs in real time:**
-```bash
-gcloud beta run services logs tail jit-admin-portal --region us-central1
-```
-
-**Check service status:**
-```bash
-gcloud run services describe jit-admin-portal --region us-central1
-```
-
-**List revisions:**
-```bash
-gcloud run revisions list --service jit-admin-portal --region us-central1
-```
-
-**Update a secret:**
-```bash
-echo -n "new-value" | gcloud secrets versions add jit-portal-session-secret --data-file=-
-```
-
-**Redeploy (after updating code in Cloud Shell):**
-```bash
-gcloud builds submit \
-  --tag us-central1-docker.pkg.dev/jit-admin-portal/jit-admin-repo/jit-admin-portal:latest \
-  && gcloud run deploy jit-admin-portal \
-  --image us-central1-docker.pkg.dev/jit-admin-portal/jit-admin-repo/jit-admin-portal:latest \
-  --region us-central1
-```
-
-**Test health check:**
-```bash
-curl -s https://jit-admin-portal-65719149240.us-central1.run.app/health | python3 -m json.tool
-```
+**Step 2 — Loop Through Each Pending Row**
+- Add a **List → For Each** action.
+- Set the list to the `Rows` output from Step 1.
+- Under **Run this Flow**, select **1.3b Helper – JIT Safety Net Check**.
+- Set **concurrency to 1** (processes one row at a time to avoid race conditions).
+- Map the following values per row:
+  - `AdminID` → `AdminID` from the row
+  - `expirationDateTime` → `expirationDateTime` from the row
+  - `tableRowId` → `Row ID` from the row
+  - `currentDateTime` → `Current Time` from the scheduled flow's context
+  - `requestorId` → `requestorId` from the row
+  - `requestorName` → `requestorName` from the row
 
 ---
 
-## Monitoring and Troubleshooting
+# Flow 4 — 1.2 Helper – Wait & Suspend
 
-### Health Check Endpoint
+**Type:** Helper Flow
+**Called by:** 1.0 Main (asynchronously)
 
-`GET /health` returns:
-```json
-{
-  "status": "healthy",
-  "timestamp": "2026-02-08T..."
-}
-```
+**Purpose:** Receives the session duration and waits that many minutes before calling the Expire helper. This is the primary expiration mechanism. It runs asynchronously so the API caller gets an immediate response while this flow waits silently in the background.
 
-Returns HTTP 200 when OIDC is configured, 503 otherwise. The response is intentionally minimal to avoid information disclosure.
+### Inputs
 
-### Structured Logging
+| Input Name | Description |
+|---|---|
+| `AdminID` | Okta ID of the admin account |
+| `durationMinutes` | How many minutes to wait before expiring access |
+| `tableRowId` | Row ID of the audit table record |
+| `requestorId` | Okta ID of the original requestor |
+| `requestorName` | Display name of the original requestor |
 
-All logs are written as JSON to stdout/stderr, automatically ingested by Google Cloud Logging. Each request gets a correlation ID (`X-Request-Id` header) for tracing.
+### Steps
 
-View logs in Cloud Console:
-```
-https://console.cloud.google.com/logs/query?project=jit-admin-portal
-```
+**Step 1 — Wait for the Duration**
+- Add a **Flow Control → Wait For** action.
+- Set **delay** to `durationMinutes` from the helper inputs.
+- Set **unit** to **Minute**.
 
-Filter by severity:
-```
-resource.type="cloud_run_revision"
-resource.labels.service_name="jit-admin-portal"
-severity>=ERROR
-```
+**Step 2 — Call the Expire Helper**
+- Add a **Flow Control → Call Flow** action.
+- Select **1.4 Helper – JIT Admin Expire**.
+- Pass:
+  - `AdminID` → `AdminID`
+  - `tableRowId` → `tableRowId`
+  - `requestorId` → `requestorId`
+  - `source` → the hardcoded text `"waitfor"` (identifies this came from the timer)
+  - `requestorName` → `requestorName`
+- Collect output: `Expire Result`
 
-### Common Issues and Fixes
-
-**"Policy evaluation failed" on Okta sign-in:**
-The Authorization Server Access Policy on `/oauth2/default` must include a rule that allows the JIT Admin Request Portal app. Go to `Security > API > default > Access Policies` in Okta Admin.
-
-**"PKCS8 must be PKCS#8 formatted string" error:**
-The private key PEM from Secret Manager has its newlines stripped. The application handles this automatically with PEM normalization in `workflowsService.js`. If the error persists, verify the secret value contains a valid RSA private key.
-
-**"No groups claim found in ID token" / groups missing:**
-The custom claim on the Okta authorization server must be named `JIT-groups` and configured to include in the ID token. Verify under `Security > API > default > Claims`. The code reads `claims['JIT-groups']` from the decoded ID token.
-
-**Container fails to start (MODULE_NOT_FOUND):**
-Ensure the `package.json` in Cloud Shell matches the local version with all dependencies (especially `express-rate-limit`). Rebuild the container after updating.
-
-**Artifact Registry "Repository not found":**
-The repository may have been deleted. Recreate it:
-```bash
-gcloud artifacts repositories create jit-admin-repo \
-  --repository-format=docker \
-  --location=us-central1
-```
-
-**500 on /dashboard (authorization middleware):**
-Check Cloud Run logs for the specific error. Common causes:
-- `JIT-groups` claim not configured on the authorization server
-- User not assigned to the OIDC app in Okta
-- Access Policy not allowing token issuance
+**Step 3 — Handle Result**
+- Add a **Branching → If/Else** card.
+- Condition: `Expire Result` **equal to** `"Success"`
+- **TRUE path:** Add a **Text → Compose** with a success message (e.g. `"JIT Admin expiration completed successfully"`).
+- **FALSE path:** Add a **Text → Compose** with a failure message (e.g. `"JIT Admin expiration encountered an issue"`).
 
 ---
 
-## Known Issues and Notes
+# Flow 5 — 1.1 Helper – JIT-Admin-Approve
 
-- **In-memory sessions**: Sessions are stored in-memory (default Express session store). Sessions are lost when Cloud Run instances restart or scale. For multi-instance or persistent sessions, add a Redis-backed session store (e.g., Google Cloud Memorystore).
-- **Okta preview environment**: The Okta org `nfi.oktapreview.com` is a preview/sandbox environment. For production, update `OKTA_ORG_URL` to the production Okta org and reconfigure both Okta applications.
-- **Repo name mismatch**: `deploy.sh` references `jit-portal-repo` while the Artifact Registry was created as `jit-admin-repo`. Either update the script or use manual deploy commands.
-- **Okta Workflow**: The `JIT-Admin-Request` workflow in Okta Workflows needs to be built to handle the incoming request payload (requestType, duration, justification, requestor info) and implement the approval/provisioning logic.
+**Type:** Helper Flow
+**Called by:** 1.0 Main
+
+**Purpose:** Handles the approval step. For standard and extended requests, the requestor self-approves via their own MFA push notification. For emergency requests, the requestor's manager is challenged instead. It polls for the response and returns the result.
+
+### Inputs
+
+| Input Name | Description |
+|---|---|
+| `requestorId` | Okta ID of the requestor |
+| `adminAccountId` | Okta ID of the linked admin account |
+| `requestorEmail` | Requestor's primary email |
+| `requestorName` | Requestor's display name |
+| `businessJustification` | The reason provided for the request (may be empty for extended requests) |
+| `durationMinutes` | Requested duration in minutes |
+| `requestType` | `"standard"`, `"extended"`, or `"emergency"` |
+
+### Steps
+
+**Step 1 — Check Request Type**
+- Add a **Branching → If/Else** card.
+- Condition: `requestType` **equal to** `"emergency"`
+- **TRUE path** → look up the manager and challenge them (emergency requires manager approval)
+- **FALSE path** → challenge the requestor directly (standard and extended use self-approval)
+
+---
+
+### TRUE Path — Emergency Request (Manager Approval)
+
+**T1 — Read Requestor's Profile**
+- Add an Okta **Read User** action.
+- Input: `requestorId`.
+- Outputs to collect: `ID`, `Status`, `First name`, `Last name`, `Primary email`, `Manager` (manager's email address).
+
+**T2 — Concatenate Manager Name**
+- Add a **Text → Concatenate** action.
+- Combine First name + a space + Last name.
+- Output: `manager name` (for reference/logging).
+
+**T3 — Look Up the Manager's Okta Account**
+- Add an Okta **List Users with Search** action.
+- Set **Primary email** input to the `Manager` value from T1 (manager's email).
+- Outputs to collect: Manager's `ID`, `Status`, `First Name`, `Last Name`, `Login`.
+
+**T4 — Build the Manager's Factor API Endpoint**
+- Add a **Text → Concatenate** action with three parts:
+  - Part 1: `/api/v1/users/`
+  - Part 2: Manager's `ID` (from T3)
+  - Part 3: `/factors`
+- Output: `Factor API endpoint`
+
+**T5 — Fetch Manager's Enrolled Factors**
+- Add an Okta **Custom API Action**.
+- Set the Relative URL to `Factor API endpoint` from T4.
+- This calls the Okta Factors API to retrieve all enrolled factors for the manager.
+- Output: `Body` (raw JSON)
+
+**T6 — Parse the Factor List**
+- Add a **JSON → Parse** action.
+- Input: `Body` from T5.
+- Output: `Mgr Factors` (a structured list of the manager's factors)
+
+**T7 — Find the Push Factor**
+- Add a **List → Find** action.
+- List: `Mgr Factors`
+- Filter path: `factorType`, comparison: **equal to**, value: `"push"`
+- Outputs: `List of Push Factors`, `Push Factors Number`
+
+**T8 — Check if a Push Factor Exists**
+- Add a **Branching → If/Else** card.
+- Condition: `List of Push Factors` **is not empty**
+- **TRUE path** → proceed to issue the challenge
+- **FALSE path** → the manager has no push factor enrolled; add a **Return Error** with a descriptive message (e.g. `"Approver has no push factor enrolled"`)
+
+**T9 — Issue MFA Challenge to Manager**
+- Add a **Flow Control → Call Flow** action.
+- Select your **Issue MFA Challenge** helper flow (a pre-built or custom flow that triggers an Okta push notification).
+- Input: `ID or Login` = Manager's `ID` from T3.
+- Output: `pollUrl` (the URL used to check the push response status)
+
+**T10 — Poll for the MFA Response**
+- Add a **Flow Control → Call Flow** action.
+- Select your **Poll MFA Status** helper flow (a flow that checks whether the push was approved or denied, and loops if still pending).
+- Inputs: `pollUrl` from T9, `iteration = 0`.
+- Output: `Poll MFA Result` (True = approved, False = denied/timed out)
+
+**T11 — Assign the Poll Result**
+- Add a **Flow Control → Assign** action.
+- Set `Poll MFA Result` = the output from T10.
+
+**T12 — Check the Poll Result**
+- Add a **Branching → If/Else** card.
+- Condition: `Poll MFA Result` **equal to** `True`
+- **TRUE path:** Add a **Flow Control → Return** with output `approvalResult = True`.
+- **FALSE path:** Add a **Flow Control → Return** with output `approvalResult = False`.
+
+---
+
+### FALSE Path — Standard / Extended Request (Requestor Self-Approval)
+
+Repeat steps T1 through T12 above, but instead of looking up the manager:
+- Use `requestorId` as the user to read (instead of manager lookup).
+- Build the Factor API endpoint using the **requestor's** Okta `ID`.
+- Issue the MFA challenge to the **requestor** directly.
+- Poll and return the result the same way.
+
+This path allows the requestor to self-approve using their own push factor for standard and extended requests.
+
+---
+
+# Flow 6 — 1.0 Main – JIT Admin Activate
+
+**Type:** API Endpoint (HTTP POST)
+**Status:** ON — this is the entry point for the entire framework.
+
+**Purpose:** Receives the JIT access request, validates the requestor and their admin account, calls the approval helper, and if approved, activates the admin account, records the session, and kicks off the async wait timer.
+
+### Inputs (HTTP Request Body)
+
+| Input Name | Description |
+|---|---|
+| `requestorLogin` | Okta login/username of the person requesting access |
+| `requestorId` | Okta ID of the requestor |
+| `durationMinutes` | How long the admin access should last (in minutes) |
+| `businessJustification` | Text reason for the request |
+| `requestorEmail` | Email of the requestor |
+| `requestType` | `"standard"` (self-approval), `"extended"` (self-approval, no justification), or `"emergency"` (manager approval) |
+| `sourceApplication` | Name of the system or app that sent the request |
+| `requestTimestamp` | Timestamp of when the request was made |
+| `requestorName` | Display name of the requestor (pre-built by the portal) |
+| `correlationId` | Unique request tracking ID from the portal (useful for log correlation) |
+
+### Steps
+
+**Step 1 — Read the Requestor's Okta Profile**
+- Add an Okta **Read User** action.
+- Set ID or Login to `requestorId` from the request body.
+- Collect: `ID`, `Status`, `Username`, `First name`, `Last name`, `Primary email`, `Secondary email`.
+
+**Step 2 — Build the Requestor's Display Name**
+- Add a **Text → Concatenate** action.
+- Combine `First name` + a space + `Last name`.
+- Output: `Requestor Name`
+
+**Step 3 — Validate: Is the Requestor's Account ACTIVE?**
+- Add a **Branching → If/Else** card.
+- Condition: `Status` (from Step 1) **equal to** `"ACTIVE"`
+- **TRUE path:** Add a **Flow Control → Assign** with `msg = "proceed"` and continue.
+- **FALSE path:**
+  - Add a **Text → Compose** action. Write a message such as: `"Requestor: [Requestor Name] — Failed Admin Access request from [sourceApplication] at [requestTimestamp] because their account is not Active."`
+  - Add an **Error Handling → Return Error** with status code `500` and a descriptive message such as `"Request account is not active"`.
+
+**Step 4 — Get the Requestor's Linked Admin Account**
+- Add an Okta **Get Primary Linked Object Value** action.
+- Set the User to the requestor's `ID` from Step 1.
+- This retrieves the admin account linked to the requestor via the Linked Objects configuration.
+- Collect: `Admin User ID`, `User Self Link`.
+
+**Step 5 — Validate: Does the Requestor Have a Linked Admin Account?**
+- Add a **Branching → If/Else** card.
+- Condition: `Admin User ID` **is not empty**
+- **TRUE path:** Add a **Flow Control → Assign** with `msg = "proceed"` and continue.
+- **FALSE path:**
+  - Add a **Text → Compose** action with an error message such as: `"Failed Admin Access request from [sourceApplication] at [requestTimestamp] because [Requestor Name] does not have an Admin Account linked."`
+  - Add an **Error Handling → Return Error**: status `500`, message `"No admin account linked to this user."`
+
+**Step 6 — Read the Admin Account's Profile**
+- Add an Okta **Read User** action.
+- Set ID or Login to `Admin User ID` from Step 4.
+- Collect: `Admin ID`, `Status`, `Username`, `Primary email`, `Secondary email`, and your `JIT Expiration` custom attribute.
+
+**Step 7 — Check if Admin Account is Already Elevated**
+- Add two **Branching → Assign If** cards in parallel:
+  - **Assign If A:** `Status` **equal to** `"PROVISIONED"` → if true output `false`, else output `true`
+  - **Assign If B:** `Status` **equal to** `"ACTIVE"` → if true output `false`, else output `true`
+- Feed both outputs into a **True/False → Any False?** card.
+  - If the admin is already ACTIVE or PROVISIONED, one of the Assign Ifs returns `false`, making `any false?` = true.
+- Add a **Branching → If/Else** card.
+  - Condition: `any false?` **equal to** `false` (meaning the admin is in a neutral/suspendable state)
+  - **TRUE path** → proceed to Step 8 (approval)
+  - **FALSE path:**
+    - Add a **Flow Control → Assign** with a message such as `"Admin account already active."` and return this to the caller.
+
+**Step 8 — Call the Approval Helper**
+- Add a **Flow Control → Call Flow** action.
+- Select **1.1 Helper – JIT-Admin-Approve**.
+- Map inputs:
+  - `requestorId` → `requestorId`
+  - `adminAccountId` → `Admin User ID`
+  - `requestorEmail` → `Primary email` (requestor's)
+  - `requestorName` → `Requestor Name`
+  - `reason` → `businessJustification`
+  - `durationMinutes` → `durationMinutes`
+  - `requestType` → `requestType`
+- Collect output: `approvalResult`
+
+**Step 9 — Check the Approval Result**
+- Add a **Branching → If/Else** card.
+- Condition: `approvalResult` **equal to** `True`
+- **FALSE path** → no action needed, flow ends (access was denied by approver).
+- **TRUE path** → continue to Step 10.
+
+**Step 10 — Search for Existing Pending Sessions**
+- Add a **Tables → Search Rows** action on your JIT audit table.
+- Filter: `"status" = "pending"`, Sort: Descending.
+- This is used to check for any prior active sessions and pass context to the return message.
+
+**Step 11 — Compose and Return Success to the API Caller**
+- Add a **Text → Compose** action with a success message for the caller.
+- Add a **Flow Control → Return** action to immediately send a success response back to the calling system.
+- This return happens before the activation steps below, so the API caller does not have to wait.
+
+**Step 12 — Start the Async Expiration Timer**
+- Add a **Flow Control → Call Flow Async** action.
+- Select **1.2 Helper – Wait & Suspend**.
+- Pass: `AdminID`, `durationMinutes`, `tableRowId` (from the row created in Step 15), `requestorId`, `requestorName`.
+- Because this is **async**, it fires and runs in the background without blocking the current flow.
+
+> **Note on ordering:** Create the table row (Step 15) before passing the `tableRowId` to the async call. Arrange Steps 12–16 so that the table row is created first, then the async call is made, then the Okta activation steps follow.
+
+**Step 13 — Unsuspend / Activate the Admin Account**
+- Add an Okta **Unsuspend User** action.
+- Set the ID or Login to the `Admin ID` from Step 6.
+- This transitions the admin account from Suspended to Active.
+
+**Step 14 — Add Admin to the Privileged Group**
+- Add an Okta **Add User to Group** action.
+- Set the Group ID to your JIT Admin group.
+- Set the User ID to the `Admin ID` from Step 6.
+
+**Step 15 — Get Current Time and Calculate Expiration**
+- Add a **Date & Time → Now** action to get the current timestamp.
+- Add a **Date & Time → Add** action to add `durationMinutes` (in minutes) to the current time.
+- Output: the calculated expiration datetime.
+
+**Step 16 — Create the Audit Table Row**
+- Add a **Tables → Create Row** action on your JIT audit table.
+- Populate fields:
+  - `AdminID` → Admin ID
+  - `requestorId` → requestorId
+  - `requestorEmail` → requestor's Primary email
+  - `requestorName` → Requestor Name
+  - `durationMinutes` → durationMinutes
+  - `expirationDateTime` → calculated expiration from Step 15
+  - `source` → `sourceApplication` from the request body
+  - `status` → `"pending"`
+  - `correlationId` → `correlationId` from the request body (for traceability)
+- Collect output: `Row ID` (this is your `tableRowId`, needed by the async call and expire helper)
+
+**Step 17 — Update Admin User's Profile with Expiration**
+- Add an Okta **Update User** action.
+- Set the User ID to the `Admin ID`.
+- Under Profile, set your `JIT Expiration` custom attribute to the formatted expiration datetime.
+
+---
+
+## Audit Table Schema
+
+Create this table in Okta Workflows before building the flows. All flows read from and write to this single table.
+
+| Column Name | Type | Description |
+|---|---|---|
+| `AdminID` | Text | Okta ID of the admin account |
+| `requestorId` | Text | Okta ID of the person who requested access |
+| `requestorEmail` | Text | Email of the requestor |
+| `requestorName` | Text | Display name of the requestor |
+| `durationMinutes` | Number | Requested access duration in minutes |
+| `expirationDateTime` | Text/DateTime | Calculated datetime when access should end |
+| `source` | Text | Which system or flow created the record |
+| `correlationId` | Text | Request tracking ID from the portal (for log correlation) |
+| `createdAt` | Text | When the record was created |
+| `notes` | Text | Free-text notes (e.g. "Account suspended successfully") |
+| `status` | Text | `"pending"` while active, `"processed"` after expiration |
+| `processedSuspensionTimestamp` | Text | Datetime when the account was actually suspended |
+
+---
+
+## End-to-End Logic Summary
+
+```
+API Request → 1.0 Main
+  ├─ Read requestor profile
+  ├─ Build display name
+  ├─ [CHECK] Requestor account is ACTIVE?
+  │     No  → Return error "Not Active"
+  ├─ Get linked admin account ID
+  ├─ [CHECK] Admin account is linked?
+  │     No  → Return error "No Admin Account"
+  ├─ Read admin account profile
+  ├─ [CHECK] Admin is NOT already elevated?
+  │     Already elevated → Return "Admin account already active"
+  ├─ Call 1.1 Helper – JIT-Admin-Approve
+  │     ├─ [CHECK] requestType == "emergency"?
+  │     │     Yes → Look up manager → Get manager's factors → Push challenge to MANAGER
+  │     │     No  → Get requestor's factors → Push challenge to REQUESTOR (self-approval)
+  │     ├─ Issue MFA Challenge (helper flow)
+  │     ├─ Poll MFA Status (helper flow, loops until approved/denied/timeout)
+  │     └─ Return approvalResult (True or False)
+  ├─ [CHECK] Approved?
+  │     No  → Flow ends (access denied)
+  ├─ Return success to API caller (immediate)
+  ├─ Unsuspend admin account (Okta)
+  ├─ Add admin to privileged group (Okta)
+  ├─ Calculate expiration datetime
+  ├─ Write audit table row
+  ├─ Update admin's Okta profile with expiration
+  └─ Start async timer → 1.2 Helper – Wait & Suspend
+        ├─ Wait [durationMinutes] minutes
+        └─ Call 1.4 Helper – JIT Admin Expire
+              ├─ Read admin status
+              ├─ [CHECK] Still ACTIVE?
+              │     Yes → Suspend + Remove from group + Update table + Update profile
+              │     No  → Return error (already handled)
+              └─ Return "Success" or error
+
+Scheduled Safety Net (runs every X minutes):
+1.3a Schedule – JIT Safety Net Poller
+  ├─ Search table for all rows where status = "pending"
+  └─ For Each pending row → 1.3b Helper – JIT Safety Net Check
+        ├─ Calculate minutes remaining until expiration
+        ├─ [CHECK] Expired? (minutes <= 0)
+        │     No  → Skip (not yet expired)
+        ├─ Read admin account status
+        ├─ [CHECK] Still ACTIVE?
+        │     Yes → Call 1.4 Helper – JIT Admin Expire
+        │     No  → Update table row to "processed"
+```
+
+
+---
+
+## Contributing
+
+Contributions are welcome! Please open an issue or submit a pull request.
+
+## License
+
+[MIT](LICENSE)

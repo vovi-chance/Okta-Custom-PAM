@@ -73,7 +73,7 @@ class Logger {
   }
 }
 
-const logger = new Logger({ service: 'jit-admin-portal' });
+const logger = new Logger({ service: 'okta-custom-pam' });
 
 /**
  * Express middleware that attaches a correlation ID to each request

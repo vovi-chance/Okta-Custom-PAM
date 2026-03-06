@@ -41,14 +41,7 @@ async function generateClientAssertion() {
     );
   }
 
-  // Debug: Log key characteristics (not the actual key for security)
   const trimmedKey = privateKeyPem.trim();
-  logger.info('Private key detection starting', {
-    originalLength: trimmedKey.length,
-    startsWithBrace: trimmedKey.startsWith('{'),
-    startsWithDash: trimmedKey.startsWith('-----'),
-    first30Chars: trimmedKey.substring(0, 30),
-  });
 
   let privateKey;
 
