@@ -169,6 +169,8 @@ See `./deploy.sh --help` for all available options and environment variables.
 
 ## Okta Workflow Setup Guide
 
+> **📊 Visual Guide Available** — For a card-by-card visual reference that mirrors the Okta Workflows designer, open [`docs/workflow-visual-guide.html`](docs/workflow-visual-guide.html) in your browser.
+
 The following guide provides step-by-step instructions for building the Okta Workflow that receives and processes JIT access requests from this portal.
 
 # JIT Admin Activate — Step-by-Step Recreation Guide

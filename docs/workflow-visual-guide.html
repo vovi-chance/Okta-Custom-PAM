@@ -1,0 +1,1157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Okta Workflows Visual Guide — JIT Admin Access</title>
+<style>
+  /* ─────────────────────────────────────────────────── */
+  /*  Reset & base                                       */
+  /* ─────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+      Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+    background: #f5f5f8;
+    color: #1d1d21;
+    line-height: 1.55;
+    padding: 0 0 60px;
+  }
+
+  /* ─────────────────────────────────────────────────── */
+  /*  Header                                             */
+  /* ─────────────────────────────────────────────────── */
+  .page-header {
+    background: linear-gradient(135deg, #00297a 0%, #191f6e 40%, #6c47ff 100%);
+    color: #fff;
+    padding: 48px 32px 40px;
+    text-align: center;
+  }
+  .page-header h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; }
+  .page-header p  { font-size: 1.05rem; opacity: .85; max-width: 720px; margin: 0 auto; }
+
+  /* ─────────────────────────────────────────────────── */
+  /*  Navigation                                         */
+  /* ─────────────────────────────────────────────────── */
+  .toc {
+    max-width: 960px;
+    margin: -24px auto 32px;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.08);
+    padding: 24px 32px;
+  }
+  .toc h2 { font-size: 1.1rem; margin-bottom: 12px; color: #191f6e; }
+  .toc ol { padding-left: 20px; }
+  .toc li { margin-bottom: 6px; }
+  .toc a { color: #191f6e; text-decoration: none; font-weight: 500; }
+  .toc a:hover { text-decoration: underline; }
+
+  /* Quick-start box */
+  .quick-start {
+    max-width: 960px;
+    margin: 0 auto 32px;
+    background: #eef1ff;
+    border-left: 4px solid #6c47ff;
+    border-radius: 8px;
+    padding: 20px 28px;
+  }
+  .quick-start h3 { font-size: 1rem; color: #191f6e; margin-bottom: 8px; }
+  .quick-start ol { padding-left: 18px; }
+  .quick-start li { margin-bottom: 4px; font-size: .93rem; }
+
+  /* ─────────────────────────────────────────────────── */
+  /*  Section (one per flow)                             */
+  /* ─────────────────────────────────────────────────── */
+  .flow-section {
+    max-width: 960px;
+    margin: 0 auto 40px;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.08);
+    overflow: hidden;
+  }
+  .flow-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 20px 28px;
+    border-bottom: 1px solid #e8e8ee;
+  }
+  .flow-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: .95rem;
+    color: #fff;
+    flex-shrink: 0;
+  }
+  .badge-helper   { background: #0073e6; }
+  .badge-schedule { background: #e6a100; }
+  .badge-api      { background: #00a86b; }
+  .flow-header h2 { font-size: 1.15rem; font-weight: 700; }
+  .flow-header .flow-type {
+    margin-left: auto;
+    font-size: .78rem;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+  }
+  .type-helper   { background: #dbeafe; color: #1e40af; }
+  .type-schedule { background: #fef3c7; color: #92400e; }
+  .type-api      { background: #d1fae5; color: #065f46; }
+
+  .flow-body { padding: 24px 28px; }
+  .flow-description {
+    font-size: .93rem;
+    color: #555;
+    margin-bottom: 16px;
+    line-height: 1.6;
+  }
+
+  /* Inputs table */
+  .inputs-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: .88rem; }
+  .inputs-table th {
+    text-align: left;
+    padding: 8px 12px;
+    background: #f0f0f6;
+    border-bottom: 2px solid #d1d1db;
+    font-weight: 600;
+    color: #333;
+  }
+  .inputs-table td {
+    padding: 7px 12px;
+    border-bottom: 1px solid #eee;
+    vertical-align: top;
+  }
+  .inputs-table code {
+    background: #f0f0f6;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: .85rem;
+  }
+
+  /* ─────────────────────────────────────────────────── */
+  /*  Cards pipeline (the visual workflow)               */
+  /* ─────────────────────────────────────────────────── */
+  .pipeline { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+
+  .card {
+    border: 1px solid #d1d1db;
+    border-radius: 10px;
+    background: #fff;
+    width: 210px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    overflow: hidden;
+    flex-shrink: 0;
+    position: relative;
+    font-size: .82rem;
+  }
+  .card-head {
+    padding: 8px 12px;
+    font-weight: 700;
+    font-size: .78rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #fff;
+  }
+  .card-head .icon { font-size: 1rem; }
+  .card-body { padding: 10px 12px; }
+  .card-body p { margin-bottom: 5px; color: #555; font-size: .8rem; line-height: 1.45; }
+  .card-body .field {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    margin-bottom: 3px;
+    font-size: .78rem;
+  }
+  .card-body .field-label {
+    font-weight: 600;
+    color: #444;
+    white-space: nowrap;
+  }
+  .card-body .field-value {
+    color: #6c47ff;
+    word-break: break-word;
+  }
+
+  /* Card colour themes */
+  .card-okta   .card-head { background: #00297a; }
+  .card-branch .card-head { background: #7c3aed; }
+  .card-flow   .card-head { background: #0073e6; }
+  .card-table  .card-head { background: #0891b2; }
+  .card-text   .card-head { background: #6b7280; }
+  .card-date   .card-head { background: #d97706; }
+  .card-list   .card-head { background: #059669; }
+  .card-json   .card-head { background: #8b5cf6; }
+  .card-error  .card-head { background: #dc2626; }
+  .card-api-ep .card-head { background: #00a86b; }
+  .card-assign .card-head { background: #4f46e5; }
+
+  /* Connector arrow between cards */
+  .arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: #b0b0c0;
+    font-size: 1.3rem;
+    padding: 0 2px;
+    user-select: none;
+  }
+
+  /* Branch container */
+  .branch-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+    width: auto;
+    min-width: 240px;
+    align-items: center;
+  }
+  .branch-label {
+    font-size: .72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    padding: 2px 10px;
+    border-radius: 20px;
+    display: inline-block;
+    margin-bottom: 2px;
+  }
+  .branch-true  { background: #d1fae5; color: #065f46; }
+  .branch-false { background: #fee2e2; color: #991b1b; }
+  .branch-paths { display: flex; gap: 14px; }
+  .branch-path  { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+  .branch-path .pipeline { flex-direction: column; align-items: center; }
+  .branch-path .arrow { transform: rotate(90deg); font-size: 1rem; }
+
+  /* Step label */
+  .step-num {
+    background: #191f6e;
+    color: #fff;
+    font-size: .68rem;
+    font-weight: 700;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-right: 2px;
+  }
+
+  /* Instruction list below pipeline */
+  .instructions {
+    margin-top: 20px;
+    padding: 16px 20px;
+    background: #fafafe;
+    border-radius: 8px;
+    border: 1px solid #ededf3;
+  }
+  .instructions h4 {
+    font-size: .9rem;
+    margin-bottom: 10px;
+    color: #191f6e;
+  }
+  .instructions ol {
+    padding-left: 18px;
+  }
+  .instructions li {
+    margin-bottom: 6px;
+    font-size: .87rem;
+    line-height: 1.55;
+  }
+  .instructions li code {
+    background: #f0f0f6;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: .83rem;
+  }
+
+  /* ─── Summary diagram ──────────────────────────────── */
+  .summary-diagram {
+    max-width: 960px;
+    margin: 0 auto 40px;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.08);
+    padding: 28px;
+  }
+  .summary-diagram h2 { font-size: 1.15rem; margin-bottom: 16px; color: #191f6e; }
+  .summary-diagram pre {
+    background: #1e1e2e;
+    color: #cdd6f4;
+    padding: 20px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: .82rem;
+    line-height: 1.6;
+  }
+
+  /* Approval routing table */
+  .routing-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: .88rem; }
+  .routing-table th { text-align: left; padding: 10px 14px; background: #191f6e; color: #fff; }
+  .routing-table td { padding: 10px 14px; border-bottom: 1px solid #eee; }
+  .routing-table tr:nth-child(even) td { background: #fafafe; }
+
+  /* Legend */
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: .82rem; }
+  .legend-swatch {
+    width: 16px; height: 16px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+
+  /* Responsive */
+  @media (max-width: 700px) {
+    .pipeline { flex-direction: column; align-items: center; }
+    .arrow { transform: rotate(90deg); font-size: 1rem; }
+    .card { width: 100%; max-width: 340px; }
+    .branch-paths { flex-direction: column; }
+    .flow-body { padding: 16px; }
+    .toc, .quick-start, .flow-section, .summary-diagram { margin-left: 12px; margin-right: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!--  HEADER                                            -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div class="page-header">
+  <h1>Okta Workflows — JIT Admin Access Visual Guide</h1>
+  <p>A card-by-card visual reference for building the 6 Okta Workflow flows that power the Just-In-Time Admin Access portal. Each card below mirrors an action card in the Okta Workflows designer.</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!--  TABLE OF CONTENTS                                 -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div class="toc">
+  <h2>Flow Inventory (Build in This Order)</h2>
+  <ol>
+    <li><a href="#flow1">1.4 Helper – JIT Admin Expire</a> <span style="color:#888">(Helper)</span></li>
+    <li><a href="#flow2">1.3b Helper – JIT Safety Net Check</a> <span style="color:#888">(Helper)</span></li>
+    <li><a href="#flow3">1.3a Schedule – JIT Safety Net Poller</a> <span style="color:#888">(Scheduled)</span></li>
+    <li><a href="#flow4">1.2 Helper – Wait &amp; Suspend</a> <span style="color:#888">(Helper)</span></li>
+    <li><a href="#flow5">1.1 Helper – JIT-Admin-Approve</a> <span style="color:#888">(Helper)</span></li>
+    <li><a href="#flow6">1.0 Main – JIT Admin Activate</a> <span style="color:#888">(API Endpoint)</span></li>
+  </ol>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!--  QUICK START                                       -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div class="quick-start">
+  <h3>Quick-Start Prerequisites</h3>
+  <ol>
+    <li>Create a named <strong>Okta Connection</strong> in Workflows (e.g. "Okta – YourOrg").</li>
+    <li>Set up <strong>Linked Objects</strong> in Okta (standard user → admin account).</li>
+    <li>Create a <strong>JIT Admin Group</strong> — note its Group ID.</li>
+    <li>Add a <strong>JIT Expiration</strong> custom profile attribute (text/datetime).</li>
+    <li>Create the <strong>Audit Table</strong> in Okta Workflows (see <a href="#audit-table">schema below</a>).</li>
+    <li>Ensure approvers have <strong>Okta Verify push</strong> enrolled.</li>
+  </ol>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!--  CARD LEGEND                                       -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div class="toc">
+  <h2>Card Color Legend</h2>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch" style="background:#00297a"></div> Okta Action</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#7c3aed"></div> Branching (If/Else)</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#0073e6"></div> Flow Control</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#0891b2"></div> Tables</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#6b7280"></div> Text / Compose</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#d97706"></div> Date &amp; Time</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#059669"></div> List</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#8b5cf6"></div> JSON</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#dc2626"></div> Error / Return Error</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#00a86b"></div> API Endpoint</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#4f46e5"></div> Assign</div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!--  APPROVAL ROUTING                                  -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div class="toc">
+  <h2>Approval Routing Summary</h2>
+  <table class="routing-table">
+    <tr><th>Request Type</th><th>Approval Method</th><th>Justification</th><th>Duration</th></tr>
+    <tr><td><strong>Standard</strong></td><td>MFA push to <em>requestor</em> (self-approval)</td><td>Required</td><td>15 – 240 min</td></tr>
+    <tr><td><strong>Extended</strong></td><td>MFA push to <em>requestor</em> (self-approval)</td><td>Not required</td><td>15 – 480 min</td></tr>
+    <tr><td><strong>Emergency</strong></td><td>MFA push to <em>manager</em></td><td>Required</td><td>15 – 480 min</td></tr>
+  </table>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- FLOW 1 — 1.4 Helper – JIT Admin Expire                    -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="flow-section" id="flow1">
+  <div class="flow-header">
+    <div class="flow-badge badge-helper">1</div>
+    <h2>1.4 Helper – JIT Admin Expire</h2>
+    <span class="flow-type type-helper">Helper</span>
+  </div>
+  <div class="flow-body">
+    <p class="flow-description">
+      The expiration engine. Reads the admin account, and if still active, suspends it,
+      removes it from the privileged group, updates the audit table, and records the
+      expiration time on the admin's Okta profile.
+    </p>
+
+    <table class="inputs-table">
+      <tr><th>Input</th><th>Description</th></tr>
+      <tr><td><code>AdminID</code></td><td>Okta ID of the admin account</td></tr>
+      <tr><td><code>tableRowId</code></td><td>Audit table row ID for this session</td></tr>
+      <tr><td><code>requestorId</code></td><td>Okta ID of the original requestor</td></tr>
+      <tr><td><code>source</code></td><td>Which flow triggered expiration (e.g. "waitfor", "schedule")</td></tr>
+      <tr><td><code>requestorName</code></td><td>Display name of the requestor</td></tr>
+    </table>
+
+    <!-- ── Visual pipeline ─────────────────────────────── -->
+    <div class="pipeline">
+      <!-- Step 1 -->
+      <div class="card card-okta">
+        <div class="card-head"><span class="step-num">1</span><span class="icon">🔑</span> Okta — Read User</div>
+        <div class="card-body">
+          <div class="field"><span class="field-label">ID:</span><span class="field-value">AdminID</span></div>
+          <p>→ ID, Status, Email, JIT&nbsp;Expiration</p>
+        </div>
+      </div>
+      <div class="arrow">➜</div>
+
+      <!-- Step 2 If/Else -->
+      <div class="branch-container">
+        <div class="card card-branch" style="width:240px">
+          <div class="card-head"><span class="step-num">2</span><span class="icon">🔀</span> If / Else</div>
+          <div class="card-body">
+            <div class="field"><span class="field-label">If</span><span class="field-value">Status == "ACTIVE"</span></div>
+          </div>
+        </div>
+        <div class="branch-paths">
+          <!-- TRUE -->
+          <div class="branch-path">
+            <span class="branch-label branch-true">✓ TRUE — Expire</span>
+            <div class="pipeline" style="flex-direction:column;align-items:center">
+              <div class="card card-okta">
+                <div class="card-head"><span class="step-num">2a</span><span class="icon">⏸</span> Suspend User</div>
+                <div class="card-body"><div class="field"><span class="field-label">ID:</span><span class="field-value">Admin ID</span></div></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-okta">
+                <div class="card-head"><span class="step-num">2b</span><span class="icon">👥</span> Remove from Group</div>
+                <div class="card-body">
+                  <div class="field"><span class="field-label">Group:</span><span class="field-value">JIT Admin Group</span></div>
+                  <div class="field"><span class="field-label">User:</span><span class="field-value">Admin ID</span></div>
+                </div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-date">
+                <div class="card-head"><span class="step-num">2c</span><span class="icon">🕐</span> Now</div>
+                <div class="card-body"><p>→ current timestamp</p></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-date">
+                <div class="card-head"><span class="step-num">2d</span><span class="icon">📅</span> Date to Text</div>
+                <div class="card-body"><p>Format → MM/DD/YYYY hh:mm</p></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-table">
+                <div class="card-head"><span class="step-num">2e</span><span class="icon">📝</span> Update Row</div>
+                <div class="card-body">
+                  <div class="field"><span class="field-label">Row:</span><span class="field-value">tableRowId</span></div>
+                  <div class="field"><span class="field-label">status:</span><span class="field-value">"processed"</span></div>
+                  <div class="field"><span class="field-label">notes:</span><span class="field-value">"Suspended"</span></div>
+                </div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-okta">
+                <div class="card-head"><span class="step-num">2f</span><span class="icon">✏️</span> Update User</div>
+                <div class="card-body">
+                  <div class="field"><span class="field-label">JIT Exp:</span><span class="field-value">Formatted Date</span></div>
+                </div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-flow">
+                <div class="card-head"><span class="step-num">2g</span><span class="icon">↩️</span> Return</div>
+                <div class="card-body"><div class="field"><span class="field-label">Expire Result:</span><span class="field-value">"Success"</span></div></div>
+              </div>
+            </div>
+          </div>
+          <!-- FALSE -->
+          <div class="branch-path">
+            <span class="branch-label branch-false">✗ FALSE — Not Active</span>
+            <div class="card card-error">
+              <div class="card-head"><span class="icon">⚠️</span> Return Error</div>
+              <div class="card-body"><p>"Account was not active"</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Instructions ────────────────────────────────── -->
+    <div class="instructions">
+      <h4>Build Instructions</h4>
+      <ol>
+        <li>Create a <strong>new Helper flow</strong> named <em>1.4 Helper – JIT Admin Expire</em>.</li>
+        <li>Add the 5 inputs listed above (<code>AdminID</code>, <code>tableRowId</code>, <code>requestorId</code>, <code>source</code>, <code>requestorName</code>).</li>
+        <li><strong>Step 1:</strong> Drag an <em>Okta → Read User</em> card. Map <code>AdminID</code> to the ID field.</li>
+        <li><strong>Step 2:</strong> Add an <em>If/Else</em> card. Set condition: <code>Status == "ACTIVE"</code>.</li>
+        <li><strong>TRUE path (2a–2g):</strong> Add Suspend User → Remove from Group → Now → Date to Text → Update Row → Update User → Return <code>"Success"</code>.</li>
+        <li><strong>FALSE path:</strong> Add a <em>Return Error</em> card with a descriptive message.</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- FLOW 2 — 1.3b Helper – JIT Safety Net Check               -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="flow-section" id="flow2">
+  <div class="flow-header">
+    <div class="flow-badge badge-helper">2</div>
+    <h2>1.3b Helper – JIT Safety Net Check</h2>
+    <span class="flow-type type-helper">Helper</span>
+  </div>
+  <div class="flow-body">
+    <p class="flow-description">
+      For each pending audit row, calculates whether the session is overdue. If expired and the admin is still active, it calls the Expire helper. If already suspended, it marks the row as processed.
+    </p>
+
+    <table class="inputs-table">
+      <tr><th>Input</th><th>Description</th></tr>
+      <tr><td><code>AdminID</code></td><td>Admin account Okta ID</td></tr>
+      <tr><td><code>expirationDateTime</code></td><td>Recorded expiration from audit row</td></tr>
+      <tr><td><code>tableRowId</code></td><td>Audit table row ID</td></tr>
+      <tr><td><code>currentDateTime</code></td><td>Current time from scheduler</td></tr>
+      <tr><td><code>requestorId</code></td><td>Original requestor's Okta ID</td></tr>
+      <tr><td><code>requestorName</code></td><td>Requestor display name</td></tr>
+    </table>
+
+    <!-- ── Visual pipeline ─────────────────────────────── -->
+    <div class="pipeline">
+      <div class="card card-date">
+        <div class="card-head"><span class="step-num">1</span><span class="icon">⏱</span> Date Difference</div>
+        <div class="card-body">
+          <div class="field"><span class="field-label">End:</span><span class="field-value">expirationDateTime</span></div>
+          <div class="field"><span class="field-label">Start:</span><span class="field-value">currentDateTime</span></div>
+          <p>→ minutes remaining</p>
+        </div>
+      </div>
+      <div class="arrow">➜</div>
+
+      <div class="branch-container">
+        <div class="card card-branch" style="width:240px">
+          <div class="card-head"><span class="step-num">2</span><span class="icon">🔀</span> If / Else</div>
+          <div class="card-body"><div class="field"><span class="field-label">If</span><span class="field-value">minutes ≤ 0</span></div></div>
+        </div>
+        <div class="branch-paths">
+          <div class="branch-path">
+            <span class="branch-label branch-true">✓ TRUE — Expired</span>
+            <div class="pipeline" style="flex-direction:column;align-items:center">
+              <div class="card card-okta">
+                <div class="card-head"><span class="step-num">3</span><span class="icon">🔑</span> Read User</div>
+                <div class="card-body"><div class="field"><span class="field-label">ID:</span><span class="field-value">AdminID</span></div><p>→ ID, Status</p></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="branch-container">
+                <div class="card card-branch" style="width:220px">
+                  <div class="card-head"><span class="step-num">4</span><span class="icon">🔀</span> If / Else</div>
+                  <div class="card-body"><div class="field"><span class="field-label">If</span><span class="field-value">Status == "ACTIVE"</span></div></div>
+                </div>
+                <div class="branch-paths">
+                  <div class="branch-path">
+                    <span class="branch-label branch-true">✓ TRUE</span>
+                    <div class="card card-flow">
+                      <div class="card-head"><span class="icon">📞</span> Call Flow</div>
+                      <div class="card-body"><p><strong>1.4 Expire</strong></p><div class="field"><span class="field-label">source:</span><span class="field-value">"schedule"</span></div></div>
+                    </div>
+                  </div>
+                  <div class="branch-path">
+                    <span class="branch-label branch-false">✗ FALSE</span>
+                    <div class="card card-table">
+                      <div class="card-head"><span class="icon">📝</span> Update Row</div>
+                      <div class="card-body"><div class="field"><span class="field-label">status:</span><span class="field-value">"processed"</span></div></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="branch-path">
+            <span class="branch-label branch-false">✗ FALSE — Not Yet</span>
+            <div class="card card-error">
+              <div class="card-head"><span class="icon">⚠️</span> Return Error</div>
+              <div class="card-body"><p>"Not yet expired"</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="instructions">
+      <h4>Build Instructions</h4>
+      <ol>
+        <li>Create a <strong>Helper flow</strong> named <em>1.3b Helper – JIT Safety Net Check</em>.</li>
+        <li>Add the 6 inputs above.</li>
+        <li><strong>Step 1:</strong> <em>Date &amp; Time → Difference</em>. End = <code>expirationDateTime</code>, Start = <code>currentDateTime</code>.</li>
+        <li><strong>Step 2:</strong> <em>If/Else</em> — <code>minutes ≤ 0</code>. FALSE → Return Error "Not yet expired".</li>
+        <li><strong>Step 3 (TRUE):</strong> <em>Okta → Read User</em> with <code>AdminID</code>.</li>
+        <li><strong>Step 4:</strong> Another <em>If/Else</em> — <code>Status == "ACTIVE"</code>.</li>
+        <li>TRUE → <em>Call Flow</em> → <strong>1.4 Expire</strong> with <code>source = "schedule"</code>.</li>
+        <li>FALSE → <em>Update Row</em> — set <code>status = "processed"</code>.</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- FLOW 3 — 1.3a Schedule – JIT Safety Net Poller            -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="flow-section" id="flow3">
+  <div class="flow-header">
+    <div class="flow-badge badge-schedule">3</div>
+    <h2>1.3a Schedule – JIT Safety Net Poller</h2>
+    <span class="flow-type type-schedule">Scheduled</span>
+  </div>
+  <div class="flow-body">
+    <p class="flow-description">
+      Runs every 5–15 minutes. Finds all audit rows still in "pending" status and
+      sends each one to the Safety Net Check helper.
+    </p>
+
+    <div class="pipeline">
+      <div class="card card-table">
+        <div class="card-head"><span class="step-num">1</span><span class="icon">🔍</span> Search Rows</div>
+        <div class="card-body">
+          <div class="field"><span class="field-label">Table:</span><span class="field-value">JIT Audit</span></div>
+          <div class="field"><span class="field-label">Where:</span><span class="field-value">status = "pending"</span></div>
+          <p>→ Rows list</p>
+        </div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="card card-list">
+        <div class="card-head"><span class="step-num">2</span><span class="icon">🔁</span> For Each</div>
+        <div class="card-body">
+          <div class="field"><span class="field-label">List:</span><span class="field-value">Rows</span></div>
+          <div class="field"><span class="field-label">Run:</span><span class="field-value">1.3b Safety Net Check</span></div>
+          <div class="field"><span class="field-label">Concurrency:</span><span class="field-value">1</span></div>
+          <p style="margin-top:4px">Maps AdminID, expirationDateTime, tableRowId, currentDateTime, requestorId, requestorName per row</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="instructions">
+      <h4>Build Instructions</h4>
+      <ol>
+        <li>Create a <strong>Scheduled flow</strong> named <em>1.3a Schedule – JIT Safety Net Poller</em>.</li>
+        <li>Set the schedule to every <strong>5–15 minutes</strong>. Keep it <strong>OFF</strong> until testing is complete.</li>
+        <li><strong>Step 1:</strong> <em>Tables → Search Rows</em>. Filter: <code>status = "pending"</code>.</li>
+        <li><strong>Step 2:</strong> <em>List → For Each</em>. Select <strong>1.3b Safety Net Check</strong>. Set concurrency to <strong>1</strong>. Map the 6 fields from each row.</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- FLOW 4 — 1.2 Helper – Wait & Suspend                     -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="flow-section" id="flow4">
+  <div class="flow-header">
+    <div class="flow-badge badge-helper">4</div>
+    <h2>1.2 Helper – Wait &amp; Suspend</h2>
+    <span class="flow-type type-helper">Helper</span>
+  </div>
+  <div class="flow-body">
+    <p class="flow-description">
+      The primary expiration timer. Runs asynchronously — waits for the requested duration then calls the Expire helper. The API caller gets an immediate response while this waits silently in the background.
+    </p>
+
+    <table class="inputs-table">
+      <tr><th>Input</th><th>Description</th></tr>
+      <tr><td><code>AdminID</code></td><td>Admin account Okta ID</td></tr>
+      <tr><td><code>durationMinutes</code></td><td>Minutes to wait before expiring</td></tr>
+      <tr><td><code>tableRowId</code></td><td>Audit table row ID</td></tr>
+      <tr><td><code>requestorId</code></td><td>Original requestor's Okta ID</td></tr>
+      <tr><td><code>requestorName</code></td><td>Requestor display name</td></tr>
+    </table>
+
+    <div class="pipeline">
+      <div class="card card-flow">
+        <div class="card-head"><span class="step-num">1</span><span class="icon">⏳</span> Wait For</div>
+        <div class="card-body">
+          <div class="field"><span class="field-label">Delay:</span><span class="field-value">durationMinutes</span></div>
+          <div class="field"><span class="field-label">Unit:</span><span class="field-value">Minute</span></div>
+        </div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="card card-flow">
+        <div class="card-head"><span class="step-num">2</span><span class="icon">📞</span> Call Flow</div>
+        <div class="card-body">
+          <p><strong>1.4 Expire</strong></p>
+          <div class="field"><span class="field-label">source:</span><span class="field-value">"waitfor"</span></div>
+          <p>→ Expire Result</p>
+        </div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="branch-container">
+        <div class="card card-branch" style="width:240px">
+          <div class="card-head"><span class="step-num">3</span><span class="icon">🔀</span> If / Else</div>
+          <div class="card-body"><div class="field"><span class="field-label">If</span><span class="field-value">Expire Result == "Success"</span></div></div>
+        </div>
+        <div class="branch-paths">
+          <div class="branch-path">
+            <span class="branch-label branch-true">✓ TRUE</span>
+            <div class="card card-text">
+              <div class="card-head"><span class="icon">💬</span> Compose</div>
+              <div class="card-body"><p>"Expiration completed successfully"</p></div>
+            </div>
+          </div>
+          <div class="branch-path">
+            <span class="branch-label branch-false">✗ FALSE</span>
+            <div class="card card-text">
+              <div class="card-head"><span class="icon">💬</span> Compose</div>
+              <div class="card-body"><p>"Expiration encountered an issue"</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="instructions">
+      <h4>Build Instructions</h4>
+      <ol>
+        <li>Create a <strong>Helper flow</strong> named <em>1.2 Helper – Wait &amp; Suspend</em>.</li>
+        <li>Add 5 inputs: <code>AdminID</code>, <code>durationMinutes</code>, <code>tableRowId</code>, <code>requestorId</code>, <code>requestorName</code>.</li>
+        <li><strong>Step 1:</strong> <em>Flow Control → Wait For</em>. Map <code>durationMinutes</code>, unit = <strong>Minute</strong>.</li>
+        <li><strong>Step 2:</strong> <em>Call Flow</em> → <strong>1.4 Expire</strong>. Pass all inputs, <code>source = "waitfor"</code>.</li>
+        <li><strong>Step 3:</strong> <em>If/Else</em> — check <code>Expire Result == "Success"</code>. Add Compose cards for both outcomes.</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- FLOW 5 — 1.1 Helper – JIT-Admin-Approve                  -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="flow-section" id="flow5">
+  <div class="flow-header">
+    <div class="flow-badge badge-helper">5</div>
+    <h2>1.1 Helper – JIT-Admin-Approve</h2>
+    <span class="flow-type type-helper">Helper</span>
+  </div>
+  <div class="flow-body">
+    <p class="flow-description">
+      Handles MFA-based approval. For <strong>standard/extended</strong> requests the requestor approves via their own push.
+      For <strong>emergency</strong> requests the manager gets the push. Polls until approved, denied, or timed out.
+    </p>
+
+    <table class="inputs-table">
+      <tr><th>Input</th><th>Description</th></tr>
+      <tr><td><code>requestorId</code></td><td>Requestor's Okta ID</td></tr>
+      <tr><td><code>adminAccountId</code></td><td>Linked admin account Okta ID</td></tr>
+      <tr><td><code>requestorEmail</code></td><td>Requestor's email</td></tr>
+      <tr><td><code>requestorName</code></td><td>Requestor's display name</td></tr>
+      <tr><td><code>businessJustification</code></td><td>Reason for request</td></tr>
+      <tr><td><code>durationMinutes</code></td><td>Requested duration</td></tr>
+      <tr><td><code>requestType</code></td><td>"standard", "extended", or "emergency"</td></tr>
+    </table>
+
+    <!-- ── Visual pipeline ─────────────────────────────── -->
+    <div class="pipeline">
+      <div class="branch-container" style="width:100%">
+        <div class="card card-branch" style="width:280px">
+          <div class="card-head"><span class="step-num">1</span><span class="icon">🔀</span> If / Else</div>
+          <div class="card-body"><div class="field"><span class="field-label">If</span><span class="field-value">requestType == "emergency"</span></div></div>
+        </div>
+        <div class="branch-paths">
+          <!-- TRUE — Emergency / Manager -->
+          <div class="branch-path">
+            <span class="branch-label branch-true">✓ TRUE — Emergency (Manager)</span>
+            <div class="pipeline" style="flex-direction:column;align-items:center">
+              <div class="card card-okta">
+                <div class="card-head"><span class="step-num">T1</span><span class="icon">🔑</span> Read User</div>
+                <div class="card-body"><div class="field"><span class="field-label">ID:</span><span class="field-value">requestorId</span></div><p>→ Manager email</p></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-okta">
+                <div class="card-head"><span class="step-num">T3</span><span class="icon">🔎</span> List Users (Search)</div>
+                <div class="card-body"><div class="field"><span class="field-label">Email:</span><span class="field-value">Manager email</span></div><p>→ Manager ID</p></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-text">
+                <div class="card-head"><span class="step-num">T4</span><span class="icon">🔗</span> Concatenate</div>
+                <div class="card-body"><p>/api/v1/users/<em>{MgrID}</em>/factors</p></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-okta">
+                <div class="card-head"><span class="step-num">T5</span><span class="icon">🌐</span> Custom API</div>
+                <div class="card-body"><p>GET factors endpoint → Body</p></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-json">
+                <div class="card-head"><span class="step-num">T6</span><span class="icon">{}</span> Parse JSON</div>
+                <div class="card-body"><p>→ Mgr Factors list</p></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-list">
+                <div class="card-head"><span class="step-num">T7</span><span class="icon">🔍</span> Find</div>
+                <div class="card-body"><div class="field"><span class="field-label">Filter:</span><span class="field-value">factorType == "push"</span></div></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-branch" style="width:220px">
+                <div class="card-head"><span class="step-num">T8</span><span class="icon">🔀</span> If / Else</div>
+                <div class="card-body"><div class="field"><span class="field-label">If</span><span class="field-value">push list not empty</span></div></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-flow">
+                <div class="card-head"><span class="step-num">T9</span><span class="icon">📲</span> Issue MFA Challenge</div>
+                <div class="card-body"><div class="field"><span class="field-label">User:</span><span class="field-value">Manager ID</span></div><p>→ pollUrl</p></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-flow">
+                <div class="card-head"><span class="step-num">T10</span><span class="icon">🔄</span> Poll MFA Status</div>
+                <div class="card-body"><p>→ True / False</p></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-flow">
+                <div class="card-head"><span class="step-num">T12</span><span class="icon">↩️</span> Return</div>
+                <div class="card-body"><div class="field"><span class="field-label">approvalResult:</span><span class="field-value">True / False</span></div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- FALSE — Standard/Extended / Self -->
+          <div class="branch-path">
+            <span class="branch-label branch-false">✗ FALSE — Standard / Extended (Self)</span>
+            <div class="pipeline" style="flex-direction:column;align-items:center">
+              <div class="card card-okta">
+                <div class="card-head"><span class="icon">🔑</span> Read User</div>
+                <div class="card-body"><div class="field"><span class="field-label">ID:</span><span class="field-value">requestorId</span></div></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-text">
+                <div class="card-head"><span class="icon">🔗</span> Concatenate</div>
+                <div class="card-body"><p>/api/v1/users/<em>{ID}</em>/factors</p></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-okta">
+                <div class="card-head"><span class="icon">🌐</span> Custom API</div>
+                <div class="card-body"><p>GET factors → Body</p></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-json">
+                <div class="card-head"><span class="icon">{}</span> Parse JSON</div>
+                <div class="card-body"><p>→ Factors list</p></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-list">
+                <div class="card-head"><span class="icon">🔍</span> Find push</div>
+                <div class="card-body"><div class="field"><span class="field-label">Filter:</span><span class="field-value">factorType == "push"</span></div></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-flow">
+                <div class="card-head"><span class="icon">📲</span> Issue MFA Challenge</div>
+                <div class="card-body"><div class="field"><span class="field-label">User:</span><span class="field-value">Requestor ID</span></div></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-flow">
+                <div class="card-head"><span class="icon">🔄</span> Poll MFA Status</div>
+                <div class="card-body"><p>→ True / False</p></div>
+              </div>
+              <div class="arrow" style="transform:rotate(90deg)">➜</div>
+              <div class="card card-flow">
+                <div class="card-head"><span class="icon">↩️</span> Return</div>
+                <div class="card-body"><div class="field"><span class="field-label">approvalResult:</span><span class="field-value">True / False</span></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="instructions">
+      <h4>Build Instructions</h4>
+      <ol>
+        <li>Create a <strong>Helper flow</strong> named <em>1.1 Helper – JIT-Admin-Approve</em>.</li>
+        <li>Add the 7 inputs listed above.</li>
+        <li><strong>Step 1:</strong> <em>If/Else</em> — <code>requestType == "emergency"</code>.</li>
+        <li><strong>TRUE path (Emergency):</strong>
+          <ul>
+            <li>Read User (requestor) → get Manager email.</li>
+            <li>List Users (search by manager email) → get Manager ID.</li>
+            <li>Concatenate factor API URL → Custom API call → Parse JSON → Find push factor.</li>
+            <li>If push exists → Issue MFA Challenge to <strong>manager</strong> → Poll → Return result.</li>
+          </ul>
+        </li>
+        <li><strong>FALSE path (Standard/Extended):</strong> Same sequence but target the <strong>requestor</strong> directly for the MFA push.</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- FLOW 6 — 1.0 Main – JIT Admin Activate                   -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="flow-section" id="flow6">
+  <div class="flow-header">
+    <div class="flow-badge badge-api">6</div>
+    <h2>1.0 Main – JIT Admin Activate</h2>
+    <span class="flow-type type-api">API Endpoint</span>
+  </div>
+  <div class="flow-body">
+    <p class="flow-description">
+      The entry point for the entire JIT framework. Receives the HTTP POST from the portal,
+      validates the requestor and their linked admin account, calls the approval helper, and if
+      approved — activates the admin, writes the audit row, and starts the async expiration timer.
+    </p>
+
+    <table class="inputs-table">
+      <tr><th>Input (HTTP Body)</th><th>Description</th></tr>
+      <tr><td><code>requestorLogin</code></td><td>Okta login/username</td></tr>
+      <tr><td><code>requestorId</code></td><td>Okta ID of requestor</td></tr>
+      <tr><td><code>durationMinutes</code></td><td>Requested access duration</td></tr>
+      <tr><td><code>businessJustification</code></td><td>Reason for the request</td></tr>
+      <tr><td><code>requestorEmail</code></td><td>Requestor email</td></tr>
+      <tr><td><code>requestType</code></td><td>"standard", "extended", or "emergency"</td></tr>
+      <tr><td><code>sourceApplication</code></td><td>Calling system name</td></tr>
+      <tr><td><code>requestTimestamp</code></td><td>When the request was made</td></tr>
+      <tr><td><code>requestorName</code></td><td>Display name</td></tr>
+      <tr><td><code>correlationId</code></td><td>Unique tracking ID</td></tr>
+    </table>
+
+    <!-- ── Visual pipeline — Part 1: Validation ─────────── -->
+    <h4 style="margin:16px 0 10px;color:#191f6e;font-size:.95rem">Part 1 — Validation &amp; Approval</h4>
+    <div class="pipeline">
+      <div class="card card-api-ep">
+        <div class="card-head"><span class="icon">🌐</span> API Endpoint</div>
+        <div class="card-body"><p>HTTP POST receives request body with 10 fields</p></div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="card card-okta">
+        <div class="card-head"><span class="step-num">1</span><span class="icon">🔑</span> Read User</div>
+        <div class="card-body"><div class="field"><span class="field-label">ID:</span><span class="field-value">requestorId</span></div><p>→ Status, Name…</p></div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="card card-text">
+        <div class="card-head"><span class="step-num">2</span><span class="icon">🔗</span> Concatenate</div>
+        <div class="card-body"><p>First + " " + Last<br>→ Requestor Name</p></div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="card card-branch" style="width:190px">
+        <div class="card-head"><span class="step-num">3</span><span class="icon">🔀</span> If / Else</div>
+        <div class="card-body"><div class="field"><span class="field-label">If</span><span class="field-value">Status == "ACTIVE"</span></div><p style="font-size:.72rem;color:#991b1b">FALSE → Return Error</p></div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="card card-okta">
+        <div class="card-head"><span class="step-num">4</span><span class="icon">🔗</span> Get Linked Object</div>
+        <div class="card-body"><p>→ Admin User ID</p></div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="card card-branch" style="width:190px">
+        <div class="card-head"><span class="step-num">5</span><span class="icon">🔀</span> If / Else</div>
+        <div class="card-body"><div class="field"><span class="field-label">If</span><span class="field-value">Admin ID not empty</span></div><p style="font-size:.72rem;color:#991b1b">FALSE → Return Error</p></div>
+      </div>
+    </div>
+
+    <div class="pipeline" style="margin-top:10px">
+      <div class="card card-okta">
+        <div class="card-head"><span class="step-num">6</span><span class="icon">🔑</span> Read Admin User</div>
+        <div class="card-body"><p>→ Admin ID, Status, JIT Exp</p></div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="card card-branch" style="width:210px">
+        <div class="card-head"><span class="step-num">7</span><span class="icon">🔀</span> If / Else</div>
+        <div class="card-body"><div class="field"><span class="field-label">If</span><span class="field-value">NOT already elevated</span></div><p style="font-size:.72rem;color:#991b1b">FALSE → "Already active"</p></div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="card card-flow">
+        <div class="card-head"><span class="step-num">8</span><span class="icon">📞</span> Call Flow</div>
+        <div class="card-body"><p><strong>1.1 Approve</strong></p><p>→ approvalResult</p></div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="card card-branch" style="width:190px">
+        <div class="card-head"><span class="step-num">9</span><span class="icon">🔀</span> If / Else</div>
+        <div class="card-body"><div class="field"><span class="field-label">If</span><span class="field-value">approved == True</span></div><p style="font-size:.72rem;color:#991b1b">FALSE → end (denied)</p></div>
+      </div>
+    </div>
+
+    <!-- ── Visual pipeline — Part 2: Activation ─────────── -->
+    <h4 style="margin:20px 0 10px;color:#191f6e;font-size:.95rem">Part 2 — Activation &amp; Async Timer (after approval)</h4>
+    <div class="pipeline">
+      <div class="card card-table">
+        <div class="card-head"><span class="step-num">10</span><span class="icon">🔍</span> Search Rows</div>
+        <div class="card-body"><div class="field"><span class="field-label">Where:</span><span class="field-value">status = "pending"</span></div></div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="card card-flow">
+        <div class="card-head"><span class="step-num">11</span><span class="icon">↩️</span> Return to Caller</div>
+        <div class="card-body"><p>Success response (immediate)</p></div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="card card-okta">
+        <div class="card-head"><span class="step-num">13</span><span class="icon">▶️</span> Unsuspend User</div>
+        <div class="card-body"><div class="field"><span class="field-label">ID:</span><span class="field-value">Admin ID</span></div></div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="card card-okta">
+        <div class="card-head"><span class="step-num">14</span><span class="icon">👥</span> Add to Group</div>
+        <div class="card-body">
+          <div class="field"><span class="field-label">Group:</span><span class="field-value">JIT Admin</span></div>
+          <div class="field"><span class="field-label">User:</span><span class="field-value">Admin ID</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pipeline" style="margin-top:10px">
+      <div class="card card-date">
+        <div class="card-head"><span class="step-num">15</span><span class="icon">🕐</span> Now + Add</div>
+        <div class="card-body"><p>Now + durationMinutes<br>→ expiration datetime</p></div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="card card-table">
+        <div class="card-head"><span class="step-num">16</span><span class="icon">➕</span> Create Row</div>
+        <div class="card-body">
+          <div class="field"><span class="field-label">status:</span><span class="field-value">"pending"</span></div>
+          <p>All audit fields populated</p>
+          <p>→ Row ID (tableRowId)</p>
+        </div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="card card-okta">
+        <div class="card-head"><span class="step-num">17</span><span class="icon">✏️</span> Update Admin User</div>
+        <div class="card-body"><div class="field"><span class="field-label">JIT Exp:</span><span class="field-value">expiration</span></div></div>
+      </div>
+      <div class="arrow">➜</div>
+      <div class="card card-flow" style="border:2px dashed #0073e6">
+        <div class="card-head"><span class="step-num">12</span><span class="icon">🚀</span> Call Flow Async</div>
+        <div class="card-body">
+          <p><strong>1.2 Wait &amp; Suspend</strong></p>
+          <p style="font-size:.72rem;color:#555">(fires in background)</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="instructions">
+      <h4>Build Instructions</h4>
+      <ol>
+        <li>Create a new <strong>API Endpoint</strong> flow named <em>1.0 Main – JIT Admin Activate</em>. Turn it <strong>ON</strong>.</li>
+        <li>The trigger card auto-creates from the HTTP POST body. Define the 10 inputs in the table above.</li>
+        <li><strong>Steps 1–2:</strong> Read User + Concatenate first/last name.</li>
+        <li><strong>Step 3:</strong> <em>If/Else</em> — is requestor ACTIVE? FALSE → Return Error.</li>
+        <li><strong>Steps 4–5:</strong> Get Linked Object → check Admin ID exists. FALSE → Return Error.</li>
+        <li><strong>Steps 6–7:</strong> Read Admin User → check NOT already ACTIVE/PROVISIONED. FALSE → return message.</li>
+        <li><strong>Step 8:</strong> <em>Call Flow</em> → <strong>1.1 Approve</strong>. Pass all required fields.</li>
+        <li><strong>Step 9:</strong> Check <code>approvalResult</code>. FALSE → flow ends.</li>
+        <li><strong>Steps 10–11:</strong> Search pending rows (context) → <em>Return</em> success to API caller <strong>immediately</strong>.</li>
+        <li><strong>Steps 13–14:</strong> Unsuspend Admin → Add to JIT Admin Group.</li>
+        <li><strong>Steps 15–16:</strong> Calculate expiration datetime → Create audit table row.</li>
+        <li><strong>Step 17:</strong> Update admin profile with JIT Expiration.</li>
+        <li><strong>Step 12:</strong> <em>Call Flow Async</em> → <strong>1.2 Wait &amp; Suspend</strong>. This runs in the background.</li>
+        <li><em>Note:</em> Create the table row (Step 16) <strong>before</strong> the async call so <code>tableRowId</code> is available.</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!--  AUDIT TABLE SCHEMA                                       -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="flow-section" id="audit-table">
+  <div class="flow-header">
+    <div class="flow-badge" style="background:#0891b2">📋</div>
+    <h2>Audit Table Schema</h2>
+    <span class="flow-type" style="background:#cffafe;color:#155e75">Reference</span>
+  </div>
+  <div class="flow-body">
+    <p class="flow-description">Create this table in Okta Workflows <strong>before</strong> building any flows. All flows read from and write to this single table.</p>
+    <table class="inputs-table">
+      <tr><th>Column</th><th>Type</th><th>Description</th></tr>
+      <tr><td><code>AdminID</code></td><td>Text</td><td>Okta ID of the admin account</td></tr>
+      <tr><td><code>requestorId</code></td><td>Text</td><td>Okta ID of the requestor</td></tr>
+      <tr><td><code>requestorEmail</code></td><td>Text</td><td>Requestor's email</td></tr>
+      <tr><td><code>requestorName</code></td><td>Text</td><td>Requestor's display name</td></tr>
+      <tr><td><code>durationMinutes</code></td><td>Number</td><td>Requested duration in minutes</td></tr>
+      <tr><td><code>expirationDateTime</code></td><td>Text/DateTime</td><td>When access should end</td></tr>
+      <tr><td><code>source</code></td><td>Text</td><td>Which system/flow created the record</td></tr>
+      <tr><td><code>correlationId</code></td><td>Text</td><td>Request tracking ID from the portal</td></tr>
+      <tr><td><code>createdAt</code></td><td>Text</td><td>When the record was created</td></tr>
+      <tr><td><code>notes</code></td><td>Text</td><td>Free-text notes</td></tr>
+      <tr><td><code>status</code></td><td>Text</td><td>"pending" while active, "processed" after expiration</td></tr>
+      <tr><td><code>processedSuspensionTimestamp</code></td><td>Text</td><td>When the account was actually suspended</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!--  END-TO-END SUMMARY DIAGRAM                               -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="summary-diagram">
+  <h2>End-to-End Flow Summary</h2>
+  <pre>
+API Request → <strong>1.0 Main – JIT Admin Activate</strong>
+  ├─ Read requestor profile
+  ├─ Build display name
+  ├─ [CHECK] Requestor account is ACTIVE?
+  │     No  → Return error "Not Active"
+  ├─ Get linked admin account ID
+  ├─ [CHECK] Admin account is linked?
+  │     No  → Return error "No Admin Account"
+  ├─ Read admin account profile
+  ├─ [CHECK] Admin is NOT already elevated?
+  │     Already elevated → Return "Admin account already active"
+  ├─ Call <strong>1.1 Helper – JIT-Admin-Approve</strong>
+  │     ├─ [CHECK] requestType == "emergency"?
+  │     │     Yes → Look up manager → MFA push to <em>MANAGER</em>
+  │     │     No  → MFA push to <em>REQUESTOR</em> (self-approval)
+  │     ├─ Issue MFA Challenge
+  │     ├─ Poll MFA Status (loops until result)
+  │     └─ Return approvalResult (True or False)
+  ├─ [CHECK] Approved?
+  │     No  → Flow ends (access denied)
+  ├─ Return success to API caller (immediate)
+  ├─ Unsuspend admin account
+  ├─ Add admin to privileged group
+  ├─ Calculate expiration datetime
+  ├─ Write audit table row
+  ├─ Update admin profile with expiration
+  └─ Start async → <strong>1.2 Helper – Wait &amp; Suspend</strong>
+        ├─ Wait [durationMinutes]
+        └─ Call <strong>1.4 Helper – JIT Admin Expire</strong>
+              ├─ [CHECK] Still ACTIVE?
+              │     Yes → Suspend + Remove from group + Update table
+              │     No  → Return error (already handled)
+              └─ Return "Success"
+
+<strong>Scheduled Safety Net</strong> (every 5–15 min):
+<strong>1.3a Schedule – JIT Safety Net Poller</strong>
+  ├─ Search table: status = "pending"
+  └─ For Each row → <strong>1.3b Helper – JIT Safety Net Check</strong>
+        ├─ Calculate minutes remaining
+        ├─ [CHECK] Expired? (minutes ≤ 0)
+        │     No  → Skip
+        ├─ [CHECK] Admin still ACTIVE?
+        │     Yes → Call <strong>1.4 Expire</strong>
+        │     No  → Mark row "processed"</pre>
+</div>
+
+<div style="text-align:center;padding:20px;color:#888;font-size:.85rem">
+  Okta Custom PAM — Workflow Visual Guide
+</div>
+
+</body>
+</html>
