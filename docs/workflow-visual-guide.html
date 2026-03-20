@@ -992,6 +992,9 @@
 
     <!-- ── Visual pipeline — Part 2: Activation ─────────── -->
     <h4 style="margin:20px 0 10px;color:#191f6e;font-size:.95rem">Part 2 — Activation &amp; Async Timer (after approval)</h4>
+    <p style="font-size:.82rem;color:#555;margin-bottom:10px;font-style:italic">
+      ⓘ Step numbers below match the README guide. Execution order: Return to caller (11) → Activate admin (13-14) → Calculate &amp; write audit row (15-16) → Update profile (17) → Start async timer (12). The async call uses <code>tableRowId</code> from step 16, so the table row must be created first.
+    </p>
     <div class="pipeline">
       <div class="card card-table">
         <div class="card-head"><span class="step-num">10</span><span class="icon">🔍</span> Search Rows</div>
